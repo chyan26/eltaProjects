@@ -8,6 +8,14 @@
 
 ```text
 sport_hightlight/
+├── csv_data/
+│   └── bottom2_ground_truth.csv
+├── dataset/
+│   └── bottom2/
+│       ├── positive/
+│       ├── hard_negative/
+│       └── manifest.csv
+├── make_clip.py
 └── mlb_highlight_groundtruth.py
 video/
 ├── eltaMax10_Reds_Brewers_0913_bottom2nd.mp4
@@ -51,7 +59,7 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
   --clip-half bottom \
   --auto-anchor \
   --audio-calibrate \
-  --out bottom2_ground_truth.csv
+  --out sport_hightlight/csv_data/bottom2_ground_truth.csv
 ```
 
 目前已驗證的結果：
@@ -72,7 +80,7 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
   --clip-half top \
   --auto-anchor \
   --audio-calibrate \
-  --out top6_ground_truth.csv
+  --out sport_hightlight/csv_data/top6_ground_truth.csv
 ```
 
 目前已驗證的結果：
@@ -102,7 +110,7 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
   --clip-half bottom \
   --auto-anchor \
   --key-events-only \
-  --out bottom2_key_events.csv
+  --out sport_hightlight/csv_data/bottom2_key_events.csv
 ```
 
 事件配對會參考局數、上下半局、事件類型與球員/事件描述。官方精華 URL 是 MLB 提供的剪輯影片，不是本地完整轉播影片中的時間位置。
@@ -125,12 +133,12 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
 
 ```bash
 python sport_hightlight/make_clip.py \
-  --ground-truth csv_data/bottom2_ground_truth.csv \
+  --ground-truth sport_hightlight/csv_data/bottom2_ground_truth.csv \
   --video video/eltaMax10_Reds_Brewers_0913_bottom2nd.mp4 \
-  --out-dir dataset/bottom2
+  --out-dir sport_hightlight/dataset/bottom2
 ```
 
-需要系統安裝 `ffmpeg` 與 `ffprobe`。`positive` 是 MLB 官方精華事件，其餘事件放在 `hard_negative`。
+需要系統安裝 `ffmpeg` 與 `ffprobe`。`positive` 是 MLB 官方精華事件，其餘事件放在 `hard_negative`；兩者與 `manifest.csv` 都位於 `sport_hightlight/dataset/bottom2/`。
 
 ## 手動指定 anchor
 
@@ -173,4 +181,4 @@ ROI 格式為：`x y width height`。需要依實際影片畫面指定比分板�
 
 ## 下一步
 
-可以使用 `bottom2_ground_truth.csv` 作為開發樣本，調整影片特徵與偵測規則，再用 `top6_ground_truth.csv` 作為未參與調參的驗證樣本，計算精華事件偵測的 precision、recall 與時間誤差。
+可以使用 `sport_hightlight/csv_data/bottom2_ground_truth.csv` 作為開發樣本，調整影片特徵與偵測規則，再用 `sport_hightlight/csv_data/top6_ground_truth.csv` 作為未參與調參的驗證樣本，計算精華事件偵測的 precision、recall 與時間誤差。
