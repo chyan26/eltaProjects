@@ -2,19 +2,16 @@
 """
 mlb_highlight_groundtruth.py
 
-自動產生棒球轉播影片的精華事件 ground truth 時間軸。
+產生棒球轉播影片的事件 ground truth 時間軸。
 
 流程：
-  1. 向 MLB Stats API 撈取指定 game_pk 的逐局/逐球資料（官方 UTC 時間）。
-  2. 在影片的比分板 ROI 上做粗取樣 frame differencing，偵測「半局切換」的候選影片時間點。
-  3. 將 API 的官方半局起始時間與影片偵測到的半局切換時間點依序配對，
-     算出每個半局各自的時間偏移量（offset），避免全場共用單一錨點造成的誤差累積。
-  4. 用偏移量把 API 裡的全壘打／得分事件換算成影片相對秒數。
-  5. 輸出一份 CSV ground truth（局數、事件類型、預測影片秒數）。
+    1. 從 MLB Stats API 的 /feed/live 取得所有逐球事件與官方時間。
+    2. 從 /content 取得官方精華影片，將其配對到逐球事件並標記。
+    3. 以半局 anchor 將事件時間換算成影片秒數。
+    4. 輸出包含所有事件與官方精華標籤的 CSV。
 
-適用對象：建議對「完整的轉播影片」跑這支腳本，而不是已經剪好的單一片段——
-因為半局切換點需要有連續多個才能依序配對校正；已經剪好的單一事件片段，
-直接用前一則訊息裡講的「局內單一錨點」手算即可，不需要跑這支腳本。
+單一半局模式使用 --auto-anchor 自動找影片起始時間；完整轉播模式則使用比分板 ROI
+偵測半局切換。--audio-calibrate 可在事件附近用音訊上升沿提供額外校準值。
 
 需求套件：
   pip install requests opencv-python numpy
@@ -36,10 +33,7 @@ mlb_highlight_groundtruth.py
             --auto-anchor \
             --out bottom2_ground_truth.csv
 
---anchor-video-seconds 是該半局第一個打席開始在影片中的秒數。單一片段模式
-        不會嘗試用比分板偵測半局切換；--auto-anchor 會尋找連續出現的球場畫面與
-        右下角 live scorebug，估計第一個打席開始時間。若轉播版型不同，可改用
-        --anchor-video-seconds 手動指定。
+若轉播版型不同，可用 --anchor-video-seconds 手動指定半局起始秒數。
 
 ROI 格式：x y width height（比分板在畫面上的像素範圍，需自行用看圖工具框出一次）
 """

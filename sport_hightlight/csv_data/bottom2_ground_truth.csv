@@ -1,0 +1,6 @@
+﻿inning,half,event_type,description,is_scoring_play,predicted_video_seconds,audio_calibrated_video_seconds,audio_offset_seconds,is_official_highlight,official_highlight_title,official_highlight_duration,official_highlight_url
+2,bottom,Strikeout,Jake Bauers strikes out swinging.,False,125.0,124.0,-1.0,False,,,
+2,bottom,Walk,Christian Yelich walks.,False,244.4,244.8,0.4,False,,,
+2,bottom,Home Run,Joey Ortiz homers (9) on a fly ball to center field. Christian Yelich scores.,True,374.9,374.3,-0.6,True,Joey Ortiz's two-run home run (9),39.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/4af2a0a6-5b4634ec-3cade2a1-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+2,bottom,Strikeout,Luis Lara strikes out swinging.,False,484.4,483.8,-0.7,False,,,
+2,bottom,Pop Out,Cooper Pratt pops out to second baseman Juan Brito.,False,528.8,528.8,0.0,False,,,
