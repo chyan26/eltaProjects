@@ -1,0 +1,29 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+
+# OS/editor
+.DS_Store
+
+# Dependencies and Python caches
+node_modules/
+.venv/
+__pycache__/
+
+# Common build and test output
+build/
+dist/
+out/
+target/
+coverage/
+.next/
+.cache/
+bin/
+obj/

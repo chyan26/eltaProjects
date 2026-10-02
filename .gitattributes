@@ -1,0 +1,2 @@
+video/eltaMax10_Reds_Brewers_0913_2up.mp4 filter=lfs diff=lfs merge=lfs -text
+video/eltaMax10_Reds_Brewers_0913_bottom2nd.mp4 filter=lfs diff=lfs merge=lfs -text
