@@ -27,3 +27,6 @@ coverage/
 .cache/
 bin/
 obj/
+
+# Generated clip datasets (keep manifests)
+sport_hightlight/dataset/**/*.mp4
