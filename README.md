@@ -9,15 +9,18 @@
 ```text
 sport_hightlight/
 ├── csv_data/
-│   └── bottom2_ground_truth.csv
+│   ├── bottom2_ground_truth.csv
+│   └── full_game_ground_truth.csv
 ├── dataset/
-│   └── bottom2/
+│   ├── bottom2/
+│   └── full_game/
 │       ├── positive/
 │       ├── hard_negative/
 │       └── manifest.csv
 ├── make_clip.py
 └── mlb_highlight_groundtruth.py
 video/
+├── eltaMax10_Reds_Brewers_0913.mp4              # 整場，連續錄影
 ├── eltaMax10_Reds_Brewers_0913_bottom2nd.mp4
 └── eltaMax10_Reds_Brewers_0913_top6th.mp4
 ```
@@ -113,10 +116,11 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
   --out sport_hightlight/csv_data/bottom2_key_events.csv
 ```
 
-事件配對會參考局數、上下半局、事件類型與球員/事件描述。官方精華 URL 是 MLB 提供的剪輯影片，不是本地完整轉播影片中的時間位置。
+事件配對主要依官方精華的 `id`（多半是 play 描述，或「投手-in-play-打者」）、打者與投手姓名、關鍵字中的球員，以及標題內有出現時的局數/半局；同分無法判定時不標記，同一個 play 有多支精華（如 ABS 挑戰）只保留一支。官方精華 URL 是 MLB 提供的剪輯影片，不是本地完整轉播影片中的時間位置。
 
 ## CSV 欄位
 
+- `game_pk`、`video`：比賽與來源影片
 - `inning`：局數
 - `half`：`top` 或 `bottom`
 - `event_type`：事件類型，例如 `Home Run`
@@ -138,7 +142,9 @@ python sport_hightlight/make_clip.py \
   --out-dir sport_hightlight/dataset/bottom2
 ```
 
-需要系統安裝 `ffmpeg` 與 `ffprobe`。`positive` 是 MLB 官方精華事件，其餘事件放在 `hard_negative`；兩者與 `manifest.csv` 都位於 `sport_hightlight/dataset/bottom2/`。
+需要系統安裝 `ffmpeg` 與 `ffprobe`。`positive` 是 MLB 官方精華事件，其餘事件放在 `hard_negative`；兩者與 `manifest.csv` 都位於輸出目錄。短片不進版控（見 `.gitignore`），只保留 `manifest.csv`。
+
+整場資料集（指令見「完整轉播模式」）：72 個 20 秒短片，約 1.3 GB，片段之間沒有重疊；依目前配對規則，`positive` 為 16 個、`hard_negative` 為 56 個。`manifest.csv` 除了標籤與時間，還記錄 `game_pk` 與 `source_video`，合併多場比賽時可追溯來源。已存在的短片預設不重新編碼，需要重切請加 `--overwrite`。
 
 ## 手動指定 anchor
 
@@ -158,18 +164,45 @@ python sport_hightlight/mlb_highlight_groundtruth.py \
 
 ## 完整轉播模式
 
-若輸入的是涵蓋整場比賽的完整轉播，可以使用比分板 ROI 偵測半局切換：
+整場錄影是連續錄影時，影片時間與 API 時間的偏移量在全場近乎固定，所以用一個 `--game-offset-seconds`（第一個打席在影片中的秒數）換算全部事件。完整流程（在專案根目錄執行）：
 
 ```bash
+cd /Users/chyan/Projects/eltaProjects
+conda activate base
+
+# 1. 產生整場 ground truth
 python sport_hightlight/mlb_highlight_groundtruth.py \
   --game-pk 823734 \
-  --video full_broadcast.mp4 \
-  --roi X Y WIDTH HEIGHT \
-  --sample-fps 1 \
-  --out ground_truth.csv
+  --video video/eltaMax10_Reds_Brewers_0913.mp4 \
+  --game-offset-seconds 150.5 \
+  --out sport_hightlight/csv_data/full_game_ground_truth.csv
+
+# 2. 刪除舊的短片資料集（避免舊分類殘留）
+rm -rf sport_hightlight/dataset/full_game
+
+# 3. 依 ground truth 從整場影片切出短片（約 3.5 分鐘）
+python sport_hightlight/make_clip.py \
+  --ground-truth sport_hightlight/csv_data/full_game_ground_truth.csv \
+  --video video/eltaMax10_Reds_Brewers_0913.mp4 \
+  --out-dir sport_hightlight/dataset/full_game
+
+# 4. 檢查結果（預期 72 筆、16 個 positive、56 個 hard_negative）
+python - <<'EOF'
+import csv
+rows = list(csv.DictReader(open("sport_hightlight/csv_data/full_game_ground_truth.csv")))
+print(len(rows), sum(r["is_official_highlight"] == "True" for r in rows))
+EOF
+ls sport_hightlight/dataset/full_game/positive | wc -l
+ls sport_hightlight/dataset/full_game/hard_negative | wc -l
 ```
 
-ROI 格式為：`x y width height`。需要依實際影片畫面指定比分板所在區域。
+第 2 步的 `rm -rf` 會永久刪除 `dataset/full_game/`，執行前請確認路徑。官方精華標記改變時，`positive` 與 `hard_negative` 的分類會跟著改變，所以重跑前需要先刪除舊資料夾；只加 `--overwrite` 的話，舊分類資料夾中的短片不會被移動。
+
+這支影片的值是用已知片段的音訊互相關求得：bottom2 為 151.0 秒、top6 為 150.5 秒，相隔約 3,350 秒仍只差 0.5 秒。輸出的全壘打時間（bottom2：2029.4、top6：5401.5）與獨立量測一致。
+
+求得偏移量的方式：有已知片段時，將片段音訊與整場音訊互相關，得到片段在整場的起點，再加上片段的 anchor 減去該半局的 API 相對時間。
+
+> 測試過「逐半局用 scorebug 邊緣搜尋 anchor」，在這支影片上偏差約 ±15 秒且假邊緣多（轉場、重播），不夠精確，因此沒有採用。直接用整場音訊與事件時間求偏移也不可靠（事件附近的起音離散度太大）。若你的錄影有剪接或廣告，偏移量會隨半局變化，這個模式就不適用。
 
 ## 目前限制
 

@@ -175,6 +175,7 @@ def make_clips(args: argparse.Namespace) -> int:
             "clip_path": str(clip_path),
             "label": label,
             "game_pk": row.get("game_pk", ""),
+            "source_video": str(args.video),
             "inning": row.get("inning", ""),
             "half": row.get("half", ""),
             "event_type": row.get("event_type", ""),
@@ -190,7 +191,7 @@ def make_clips(args: argparse.Namespace) -> int:
         })
 
     manifest_fields = list(manifest_rows[0].keys()) if manifest_rows else [
-        "clip_path", "label", "game_pk", "inning", "half", "event_type",
+        "clip_path", "label", "game_pk", "source_video", "inning", "half", "event_type",
         "description", "event_seconds", "event_time_source", "clip_start_seconds",
         "clip_end_seconds", "clip_duration_seconds", "is_official_highlight",
         "official_highlight_title", "official_highlight_url",

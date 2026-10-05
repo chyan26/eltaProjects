@@ -10,19 +10,19 @@ mlb_highlight_groundtruth.py
     3. 以半局 anchor 將事件時間換算成影片秒數。
     4. 輸出包含所有事件與官方精華標籤的 CSV。
 
-單一半局模式使用 --auto-anchor 自動找影片起始時間；完整轉播模式則使用比分板 ROI
-偵測半局切換。--audio-calibrate 可在事件附近用音訊上升沿提供額外校準值。
+單一半局模式使用 --auto-anchor 自動找影片起始時間；完整轉播模式則用 --game-offset-seconds
+指定第一個打席在影片中的秒數，連續錄影時全場共用。--audio-calibrate 可在事件
+附近用音訊上升沿提供額外校準值。
 
 需求套件：
   pip install requests opencv-python numpy
 
-使用方式：
+完整轉播使用方式：
   python mlb_highlight_groundtruth.py \
       --game-pk 823734 \
-      --video full_broadcast.mp4 \
-      --roi 1700 50 220 80 \
-      --sample-fps 1 \
-      --out ground_truth.csv
+      --video video/eltaMax10_Reds_Brewers_0913.mp4 \
+      --game-offset-seconds 150.5 \
+      --out sport_hightlight/csv_data/full_game_ground_truth.csv
 
 單一半局片段使用方式：
     python mlb_highlight_groundtruth.py \
@@ -34,15 +34,12 @@ mlb_highlight_groundtruth.py
             --out bottom2_ground_truth.csv
 
 若轉播版型不同，可用 --anchor-video-seconds 手動指定半局起始秒數。
-
-ROI 格式：x y width height（比分板在畫面上的像素範圍，需自行用看圖工具框出一次）
 """
 
 import argparse
 import csv
 import re
 import subprocess
-import sys
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -76,6 +73,8 @@ class GameEvent:
     event_type: str
     is_scoring_play: bool
     event_time: datetime  # UTC，該球（play event）發生的精確時間
+    batter: str = ""
+    pitcher: str = ""
 
 
 @dataclass
@@ -87,6 +86,8 @@ class OfficialHighlight:
     playback_url: str
     inning: Optional[int]
     half: Optional[str]
+    slug: str = ""  # content 的 id，多半是 play 描述或「投手-in-play-打者」
+    players: Tuple[str, ...] = ()
 
 
 def fetch_game_feed(game_pk: int) -> dict:
@@ -127,7 +128,7 @@ def _parse_inning(text: str) -> Tuple[Optional[int], Optional[str]]:
     match = re.search(
         r"\b(top|bottom) of the (\d+)(?:st|nd|rd|th)\b|"
         r"\b(top|bottom) (\d+)(?:st|nd|rd|th)\b|"
-        r"\bthe (\d+)(?:st|nd|rd|th) inning\b",
+        r"\bin the (\d+)(?:st|nd|rd|th)\b",
         text.lower(),
     )
     if not match:
@@ -176,6 +177,11 @@ def extract_official_highlights(
             playback_url=_playback_url(item.get("playbacks", [])),
             inning=inning,
             half=half,
+            slug=highlight_id,
+            players=tuple(
+                str(k.get("displayName", "")) for k in keywords
+                if k.get("type") == "player_id"
+            ),
         ))
     return highlights
 
@@ -185,45 +191,72 @@ def _normalise_text(text: str) -> str:
     return "".join(char for char in text if not unicodedata.combining(char)).lower()
 
 
-def match_official_highlight(
-    event: GameEvent,
-    highlights: List[OfficialHighlight],
-) -> Optional[OfficialHighlight]:
-    event_text = _normalise_text(f"{event.event_type} {event.description}")
-    event_tokens = set(re.findall(r"[a-z]{3,}", event_text))
-    event_kind = _normalise_text(event.event_type)
-    kind_patterns = {
-        "home run": ("home run", "homer"),
-        "strikeout": ("strikeout", "strikes out", "fans"),
-        "pop out": ("pop out", "pops out"),
-        "groundout": ("ground out", "grounds out"),
-        "flyout": ("fly out", "flies out"),
-        "lineout": ("line out", "lines out"),
-        "double": ("double",),
-        "single": ("single",),
-        "walk": ("walk",),
-        "sac fly": ("sacrifice fly", "sac fly"),
-    }
-    patterns = kind_patterns.get(event_kind, (event_kind,))
+def _tokens(text: str) -> List[str]:
+    return re.findall(r"[a-z0-9]+", _normalise_text(text))
 
-    best: Optional[OfficialHighlight] = None
-    best_score = 0
+
+def _contains(tokens: List[str], sub: List[str]) -> bool:
+    n = len(sub)
+    return n > 0 and any(tokens[i:i + n] == sub for i in range(len(tokens) - n + 1))
+
+
+def _slug_matches_description(slug: List[str], desc: List[str]) -> bool:
+    """slug 是 play 描述的開頭；結尾字可能被截斷，後面可能多出雜湊碼。"""
+    matched = 0
+    for s, d in zip(slug, desc):
+        if s == d:
+            matched += 1
+        else:
+            matched += d.startswith(s)
+            break
+    return matched >= 4 and len(slug) - matched <= 2
+
+
+def _match_score(event: GameEvent, highlight: OfficialHighlight) -> int:
+    """依官方精華 id 與球員關鍵字比對 play；0 表示不配對。"""
+    if highlight.inning is not None and highlight.inning != event.inning:
+        return 0
+    if highlight.half is not None and highlight.half != event.half:
+        return 0
+
+    slug = _tokens(highlight.slug)
+    desc = _tokens(event.description)
+    pitcher = _tokens(event.pitcher)
+    desc_prefix = _slug_matches_description(slug, desc)
+    batter_in_slug = _contains(slug, _tokens(event.batter))
+    if not (desc_prefix or batter_in_slug):
+        return 0
+
+    score = 4 if desc_prefix else 0
+    score += 2 if batter_in_slug else 0
+    score += 2 if _contains(slug, pitcher) else 0
+    for name in highlight.players:
+        name_tokens = _tokens(name)
+        if name_tokens == pitcher or _contains(desc, name_tokens):
+            score += 1
+    if "strike" in slug and "strikeout" in event.event_type.lower():
+        score += 1
+    return score
+
+
+def assign_official_highlights(
+    events: List[GameEvent],
+    highlights: List[OfficialHighlight],
+) -> List[Optional[OfficialHighlight]]:
+    """每支官方精華只指派給分數最高的事件；同分視為無法判定。"""
+    assigned: List[Optional[OfficialHighlight]] = [None] * len(events)
+    assigned_scores = [0] * len(events)
     for highlight in highlights:
-        if highlight.inning is None:
+        scores = [_match_score(event, highlight) for event in events]
+        best_score = max(scores, default=0)
+        if best_score == 0 or scores.count(best_score) > 1:
             continue
-        if highlight.inning != event.inning:
+        best_index = scores.index(best_score)
+        if assigned_scores[best_index] >= best_score:
             continue
-        if highlight.half is not None and highlight.half != event.half:
-            continue
-        highlight_text = _normalise_text(f"{highlight.title} {highlight.description}")
-        if not any(pattern in highlight_text for pattern in patterns):
-            continue
-        highlight_tokens = set(re.findall(r"[a-z]{3,}", highlight_text))
-        score = len(event_tokens.intersection(highlight_tokens))
-        if score >= 2 and score > best_score:
-            best = highlight
-            best_score = score
-    return best
+        assigned[best_index] = highlight
+        assigned_scores[best_index] = best_score
+    return assigned
 
 
 def parse_iso(ts: str) -> datetime:
@@ -300,77 +333,76 @@ def extract_key_events(
             event_type=event_name or ("Scoring Play" if is_scoring else "Unknown"),
             is_scoring_play=is_scoring,
             event_time=event_time,
+            batter=play.get("matchup", {}).get("batter", {}).get("fullName", ""),
+            pitcher=play.get("matchup", {}).get("pitcher", {}).get("fullName", ""),
         ))
     events.sort(key=lambda e: e.event_time)
     return events
 
 
 # --------------------------------------------------------------------------
-# 2. 在影片的比分板 ROI 上偵測半局切換的候選時間點
+# 2. 在影片中偵測 live scorebug 出現的時間點
 # --------------------------------------------------------------------------
 
-def detect_half_inning_changes_in_video(
-    video_path: str,
-    roi: Tuple[int, int, int, int],
-    sample_fps: float = 1.0,
-    diff_threshold: float = 18.0,
-    min_gap_seconds: float = 20.0,
-) -> List[float]:
-    """
-    粗取樣掃描整支影片，在比分板 ROI 上做 frame differencing，
-    回傳「疑似局數變化」的影片秒數清單。
+def _has_live_scorebug(frame: np.ndarray) -> bool:
+    small = cv2.resize(frame, (160, 90))
+    hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
+    green_ratio = float(
+        ((hsv[:, :, 0] >= 35) & (hsv[:, :, 0] <= 95) & (hsv[:, :, 1] >= 45)).mean()
+    )
 
-    這是半局切換偵測，不是逐球偵測，取樣率不需要很高（預設每秒一張）。
-    min_gap_seconds 用來避免同一次切換因為疊圖動畫被重複偵測成好幾個候選點，
-    實務上建議先用小範圍測試影片調好 diff_threshold 再跑整場。
-    """
+    scorebug = small[68:88, 125:159]
+    gray = cv2.cvtColor(scorebug, cv2.COLOR_BGR2GRAY)
+    edge_density = float(cv2.Canny(gray, 50, 150).mean() / 255.0)
+    bright_ratio = float((gray > 180).mean())
+    dark_ratio = float((gray < 60).mean())
+    return (
+        green_ratio >= 0.25
+        and edge_density >= 0.10
+        and bright_ratio >= 0.04
+        and dark_ratio >= 0.15
+    )
+
+
+def find_live_scorebug_edges(
+    video_path: str,
+    start_seconds: float,
+    end_seconds: float,
+    sample_fps: float = 2.0,
+    first_sample_is_edge: bool = False,
+    max_edges: Optional[int] = None,
+) -> List[float]:
+    """回傳視窗內 live scorebug 由無到有的影片秒數（已加一個取樣間隔）。"""
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise RuntimeError(f"無法開啟影片：{video_path}")
 
     native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_interval = max(int(round(native_fps / sample_fps)), 1)
+    start_frame = int(max(start_seconds, 0.0) * native_fps)
+    end_frame = int(end_seconds * native_fps)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
 
-    x, y, w, h = roi
-    prev_gray: Optional[np.ndarray] = None
-    candidates: List[Tuple[float, float]] = []  # (timestamp_sec, diff_score)
-
-    frame_idx = 0
-    while True:
-        ret = cap.grab()
-        if not ret:
+    edges: List[float] = []
+    previous_live = not first_sample_is_edge
+    for frame_idx in range(start_frame, end_frame):
+        if not cap.grab():
             break
-        if frame_idx % frame_interval != 0:
-            frame_idx += 1
+        if (frame_idx - start_frame) % frame_interval != 0:
             continue
-
-        ret, frame = cap.retrieve()
-        if not ret:
+        ok, frame = cap.retrieve()
+        if not ok:
             break
 
-        timestamp_sec = frame_idx / native_fps
-        patch = frame[y:y + h, x:x + w]
-        gray = cv2.cvtColor(patch, cv2.COLOR_BGR2GRAY)
-        gray = cv2.GaussianBlur(gray, (5, 5), 0)
-
-        if prev_gray is not None:
-            diff = cv2.absdiff(gray, prev_gray)
-            score = float(np.mean(diff))
-            if score > diff_threshold:
-                candidates.append((timestamp_sec, score))
-
-        prev_gray = gray
-        frame_idx += 1
+        live = _has_live_scorebug(frame)
+        if live and not previous_live:
+            edges.append(frame_idx / native_fps + 1.0 / sample_fps)
+            if max_edges is not None and len(edges) >= max_edges:
+                break
+        previous_live = live
 
     cap.release()
-
-    # 把太接近的候選點（同一次切換動畫觸發多次）合併，只留第一個
-    candidates.sort(key=lambda c: c[0])
-    merged: List[float] = []
-    for ts, _score in candidates:
-        if not merged or ts - merged[-1] > min_gap_seconds:
-            merged.append(ts)
-    return merged
+    return edges
 
 
 # --------------------------------------------------------------------------
@@ -382,37 +414,6 @@ class InningOffset:
     inning: int
     half: str
     offset_seconds: float  # video_time = api_time_epoch_seconds + offset
-
-
-def align_markers_to_video(
-    markers: List[HalfInningMarker],
-    video_timestamps: List[float],
-) -> List[InningOffset]:
-    """
-    假設兩份清單筆數、順序一一對應（都是照比賽進行順序排列的半局切換點），
-    直接按順序配對。如果筆數不一致，只配對較短清單的長度，並印出警告，
-    這種情況通常代表 diff_threshold 設太敏感（誤判太多）或太遲鈍（漏掉切換），
-    需要回頭調整參數。
-    """
-    n = min(len(markers), len(video_timestamps))
-    if len(markers) != len(video_timestamps):
-        print(
-            f"[警告] API 半局數量（{len(markers)}）與影片偵測到的切換點數量"
-            f"（{len(video_timestamps)}）不一致，只配對前 {n} 筆，"
-            f"請檢查 --diff-threshold / --min-gap-seconds 或影片是否涵蓋整場比賽。",
-            file=sys.stderr,
-        )
-
-    offsets: List[InningOffset] = []
-    for marker, video_ts in zip(markers[:n], video_timestamps[:n]):
-        api_epoch = marker.start_time.timestamp()
-        offset = video_ts - api_epoch
-        offsets.append(InningOffset(
-            inning=marker.inning,
-            half=marker.half,
-            offset_seconds=offset,
-        ))
-    return offsets
 
 
 def offset_for_event(offsets: List[InningOffset], event: GameEvent) -> Optional[float]:
@@ -439,52 +440,20 @@ def detect_clip_anchor_in_video(
     sample_fps: float = 2.0,
 ) -> float:
     """以連續球場畫面與右下角 live scorebug 估計片段的比賽開始時間。"""
-    cap = cv2.VideoCapture(video_path)
-    if not cap.isOpened():
-        raise RuntimeError(f"無法開啟影片：{video_path}")
-
-    native_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-    frame_interval = max(int(round(native_fps / sample_fps)), 1)
-    max_frames = int(search_seconds * native_fps)
-    previous_live_scorebug = False
-
-    for frame_idx in range(max_frames):
-        if not cap.grab():
-            break
-        if frame_idx % frame_interval != 0:
-            continue
-        ok, frame = cap.retrieve()
-        if not ok:
-            break
-
-        small = cv2.resize(frame, (160, 90))
-        hsv = cv2.cvtColor(small, cv2.COLOR_BGR2HSV)
-        green_ratio = float(
-            ((hsv[:, :, 0] >= 35) & (hsv[:, :, 0] <= 95) & (hsv[:, :, 1] >= 45)).mean()
-        )
-
-        scorebug = small[68:88, 125:159]
-        gray = cv2.cvtColor(scorebug, cv2.COLOR_BGR2GRAY)
-        edge_density = float(cv2.Canny(gray, 50, 150).mean() / 255.0)
-        bright_ratio = float((gray > 180).mean())
-        dark_ratio = float((gray < 60).mean())
-        has_live_scorebug = (
-            green_ratio >= 0.25
-            and edge_density >= 0.10
-            and bright_ratio >= 0.04
-            and dark_ratio >= 0.15
-        )
-
-        if has_live_scorebug and not previous_live_scorebug:
-            cap.release()
-            return frame_idx / native_fps + (1.0 / sample_fps)
-        previous_live_scorebug = has_live_scorebug
-
-    cap.release()
-    raise RuntimeError(
-        "無法自動找到片段 anchor；請改用 --anchor-video-seconds，"
-        "或調整影片前段搜尋範圍/轉播版型偵測規則"
+    edges = find_live_scorebug_edges(
+        video_path,
+        0.0,
+        search_seconds,
+        sample_fps,
+        first_sample_is_edge=True,
+        max_edges=1,
     )
+    if not edges:
+        raise RuntimeError(
+            "無法自動找到片段 anchor；請改用 --anchor-video-seconds，"
+            "或調整影片前段搜尋範圍/轉播版型偵測規則"
+        )
+    return edges[0]
 
 
 def calibrate_event_with_audio(
@@ -550,15 +519,12 @@ def calibrate_event_with_audio(
 def main():
     parser = argparse.ArgumentParser(description="自動產生棒球轉播影片的精華事件 ground truth 時間軸")
     parser.add_argument("--game-pk", type=int, required=True, help="MLB Stats API 的 game_pk（例如 823734）")
-    parser.add_argument("--video", type=str, required=True, help="完整轉播影片檔案路徑")
+    parser.add_argument("--video", type=str, required=True, help="轉播影片檔案路徑")
     parser.add_argument(
-        "--roi", type=int, nargs=4,
-        metavar=("X", "Y", "W", "H"),
-        help="比分板在畫面上的 ROI（完整影片模式必填；像素座標：x y width height）",
+        "--game-offset-seconds",
+        type=float,
+        help="完整影片模式必填：第一個打席開始在影片中的秒數（連續錄影時全場共用）",
     )
-    parser.add_argument("--sample-fps", type=float, default=1.0, help="掃描影片時的取樣頻率（預設每秒 1 張）")
-    parser.add_argument("--diff-threshold", type=float, default=18.0, help="frame diff 判定為變化的閾值，需依實際畫面調整")
-    parser.add_argument("--min-gap-seconds", type=float, default=20.0, help="同一次切換的最小間隔秒數，避免重複偵測")
     parser.add_argument("--clip-inning", type=int, help="單一半局片段的局數；需和 --clip-half、--anchor-video-seconds 一起使用")
     parser.add_argument("--clip-half", choices=("top", "bottom"), help="單一半局片段的上半局或下半局")
     parser.add_argument(
@@ -608,8 +574,8 @@ def main():
         parser.error("--auto-anchor 不可和 --anchor-video-seconds 同時使用")
     if args.clip_inning is not None and not args.auto_anchor and args.anchor_video_seconds is None:
         parser.error("片段模式必須提供 --anchor-video-seconds 或 --auto-anchor")
-    if args.clip_inning is None and args.roi is None:
-        parser.error("完整影片模式必須提供 --roi；單一半局模式可改用 clip 參數")
+    if args.clip_inning is None and args.game_offset_seconds is None:
+        parser.error("完整影片模式必須提供 --game-offset-seconds")
 
     print(f"[1/4] 向 MLB Stats API 撈取 game_pk={args.game_pk} 的逐球資料...")
     feed = fetch_game_feed(args.game_pk)
@@ -631,35 +597,34 @@ def main():
             print(
                 f"      自動偵測到片段 anchor：影片 {args.anchor_video_seconds:.1f} 秒"
             )
-        video_timestamps = [args.anchor_video_seconds]
         anchor_source = "自動偵測" if args.auto_anchor else "人工"
         print(
             f"[2/4] 使用第 {args.clip_inning} 局 {args.clip_half} 的{anchor_source} anchor "
             f"（影片 {args.anchor_video_seconds:.1f} 秒）"
         )
         print("[3/4] 依指定半局計算時間偏移量...")
-        offsets = align_markers_to_video([marker], video_timestamps)
+        offsets = [InningOffset(
+            inning=marker.inning,
+            half=marker.half,
+            offset_seconds=args.anchor_video_seconds - marker.start_time.timestamp(),
+        )]
         events = [
             event for event in events
             if event.inning == args.clip_inning and event.half == args.clip_half
         ]
     else:
-        print(f"[2/4] 掃描影片 {args.video}，偵測比分板 ROI 的半局切換點...")
-        video_timestamps = detect_half_inning_changes_in_video(
-            args.video,
-            roi=tuple(args.roi),
-            sample_fps=args.sample_fps,
-            diff_threshold=args.diff_threshold,
-            min_gap_seconds=args.min_gap_seconds,
-        )
-        print(f"      偵測到 {len(video_timestamps)} 個候選切換點")
-
-        print("[3/4] 配對官方半局時間與影片切換點，計算每個半局的時間偏移量...")
-        offsets = align_markers_to_video(markers, video_timestamps)
+        print(f"[2/4] 完整影片模式：第一個打席位於影片 {args.game_offset_seconds:.1f} 秒")
+        print("[3/4] 全場共用同一個時間偏移量...")
+        game_offset = args.game_offset_seconds - markers[0].start_time.timestamp()
+        offsets = [
+            InningOffset(inning=m.inning, half=m.half, offset_seconds=game_offset)
+            for m in markers
+        ]
 
     print(f"[4/4] 套用偏移量，換算所有精華事件的影片秒數，輸出至 {args.out} ...")
     rows = []
-    for event in events:
+    assigned_highlights = assign_official_highlights(events, official_highlights)
+    for event, official_highlight in zip(events, assigned_highlights):
         offset = offset_for_event(offsets, event)
         predicted_video_time = (
             event.event_time.timestamp() + offset if offset is not None else None
@@ -672,9 +637,10 @@ def main():
                 search_before=args.audio_search_before,
                 search_after=args.audio_search_after,
             )
-        official_highlight = match_official_highlight(event, official_highlights)
 
         rows.append({
+            "game_pk": args.game_pk,
+            "video": args.video,
             "inning": event.inning,
             "half": event.half,
             "event_type": event.event_type,
@@ -707,7 +673,7 @@ def main():
 
     with open(args.out, "w", newline="", encoding="utf-8-sig") as f:
         writer = csv.DictWriter(f, fieldnames=[
-            "inning", "half", "event_type", "description",
+            "game_pk", "video", "inning", "half", "event_type", "description",
             "is_scoring_play", "predicted_video_seconds",
             "audio_calibrated_video_seconds", "audio_offset_seconds",
             "is_official_highlight", "official_highlight_title",
