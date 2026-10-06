@@ -1,0 +1,73 @@
+﻿game_pk,video,inning,half,event_type,description,is_scoring_play,predicted_video_seconds,audio_calibrated_video_seconds,audio_offset_seconds,is_official_highlight,official_highlight_title,official_highlight_duration,official_highlight_url
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,top,Groundout,"Dane Myers grounds out, second baseman Brice Turang to first baseman Jake Bauers.",False,235.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,top,Lineout,Elly De La Cruz lines out sharply to left fielder Jackson Chourio.,False,364.8,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,top,Strikeout,Sal Stewart strikes out swinging.,False,458.0,,,True,Robert Gasser fans Sal Stewart,6.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/134972b3-657e2183-5cd3eedc-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,bottom,Strikeout,Garrett Mitchell strikes out swinging.,False,683.5,,,True,Chase Burns strikes out Garrett Mitchell,7.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/98697cd0-c59563da-c43424d4-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,bottom,Strikeout,Jackson Chourio strikes out swinging.,False,759.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,bottom,Walk,Brice Turang walks.,False,849.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,1,bottom,Groundout,"Gary Sánchez grounds out, shortstop Elly De La Cruz to first baseman Sal Stewart.",False,880.1,,,True,Elly De La Cruz's sharp grab,20.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/bd582416-3a23c808-42979ddc-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,top,Groundout,"Eugenio Suárez grounds out, shortstop Cooper Pratt to first baseman Jake Bauers.",False,1192.1,,,True,Cooper Pratt's brilliant recovery for the out,28.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/e25147b1-f1a12434-55797ef3-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,top,Walk,Tyler Stephenson walks.,False,1323.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,top,Single,JJ Bleday singles on a line drive to right fielder Luis Lara. Tyler Stephenson to 2nd.,False,1354.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,top,Flyout,Juan Brito flies out to right fielder Luis Lara.,False,1417.1,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,top,Flyout,Jose Trevino flies out to center fielder Garrett Mitchell.,False,1570.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,bottom,Strikeout,Jake Bauers strikes out swinging.,False,1779.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,bottom,Walk,Christian Yelich walks.,False,1898.9,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,bottom,Home Run,Joey Ortiz homers (9) on a fly ball to center field. Christian Yelich scores.,True,2029.4,,,True,Joey Ortiz's two-run home run (9),39.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/4af2a0a6-5b4634ec-3cade2a1-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,bottom,Strikeout,Luis Lara strikes out swinging.,False,2138.9,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,2,bottom,Pop Out,Cooper Pratt pops out to second baseman Juan Brito.,False,2183.3,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,top,Strikeout,Héctor Rodríguez strikes out swinging.,False,2385.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,top,Strikeout,Dane Myers strikes out swinging.,False,2477.8,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,top,Strikeout,Elly De La Cruz strikes out swinging.,False,2630.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,bottom,Walk,Garrett Mitchell walks.,False,2821.8,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,bottom,Strikeout Double Play,"Jackson Chourio strikes out swinging and Garrett Mitchell caught stealing 2nd, catcher Jose Trevino to second baseman Juan Brito to catcher Jose Trevino.",False,2947.0,,,True,"Reds turn a strike-'em-out, throw-'em-out double play",18.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/77dbd02f-d14e1679-ae53c22a-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,bottom,Single,Brice Turang singles on a ground ball to right fielder Héctor Rodríguez.,False,3015.3,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,3,bottom,Flyout,Gary Sánchez flies out to right fielder Héctor Rodríguez.,False,3177.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,top,Groundout,"Sal Stewart grounds out, third baseman Joey Ortiz to first baseman Jake Bauers.",False,3404.1,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,top,Flyout,Eugenio Suárez flies out to left fielder Jackson Chourio.,False,3512.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,top,Double,Tyler Stephenson hits a ground-rule double (21) on a line drive to center field.,False,3587.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,top,Walk,"JJ Bleday challenged (pitch result), call on the field was overturned: JJ Bleday walks.",False,3733.6,,,True,Strike 3 is overturned to ball 4 after ABS challenge,22.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/13b9f997-1294c55d-f6c63125-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,top,Strikeout,Juan Brito strikes out swinging.,False,3883.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,bottom,Flyout,Jake Bauers flies out to center fielder Dane Myers.,False,4021.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,bottom,Strikeout,Christian Yelich strikes out on a foul tip.,False,4112.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,4,bottom,Strikeout,Joey Ortiz strikes out swinging.,False,4237.2,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,top,Groundout,"Jose Trevino grounds out, second baseman Brice Turang to first baseman Jake Bauers.",False,4431.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,top,Groundout,"Héctor Rodríguez grounds out, third baseman Joey Ortiz to first baseman Jake Bauers.",False,4520.3,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,top,Groundout,"Dane Myers grounds out, third baseman Joey Ortiz to first baseman Jake Bauers.",False,4620.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,bottom,Groundout,"Luis Lara grounds out, shortstop Elly De La Cruz to first baseman Sal Stewart.",False,4797.5,,,True,Elly De La Cruz's gorgeous diving stop,24.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/811556a6-e2240945-54b5d7b1-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,bottom,Lineout,Cooper Pratt lines out to right fielder Héctor Rodríguez.,False,4875.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,5,bottom,Lineout,Sal Frelick lines out to right fielder Héctor Rodríguez.,False,4931.8,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Single,Elly De La Cruz singles on a ground ball to left fielder Jackson Chourio.,False,5126.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Single,Sal Stewart singles on a ground ball to center fielder Luis Lara. Elly De La Cruz to 3rd.,False,5330.9,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Home Run,Eugenio Suárez homers (24) on a fly ball to right center field. Elly De La Cruz scores. Sal Stewart scores.,True,5401.5,,,True,Eugenio Suárez's three-run home run (24),41.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/9bbfbd45-f2663301-3b3e45d6-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Groundout,"Tyler Stephenson grounds out, shortstop Cooper Pratt to first baseman Jake Bauers.",False,5512.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Strikeout,JJ Bleday called out on strikes.,False,5746.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,top,Groundout,"Juan Brito grounds out, third baseman Joey Ortiz to first baseman Jake Bauers.",False,5826.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,bottom,Groundout,"Jackson Chourio grounds out, second baseman Juan Brito to first baseman Sal Stewart.",False,5992.6,,,True,Juan Brito's terrific pick,13.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/689180f2-d73e1acf-9793a6ca-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,bottom,Groundout,"Brice Turang grounds out, second baseman Juan Brito to first baseman Sal Stewart.",False,6067.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,6,bottom,Flyout,Gary Sánchez flies out to left fielder JJ Bleday.,False,6188.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,top,Groundout,"Jose Trevino grounds out, second baseman Brice Turang to first baseman Jake Bauers.",False,6374.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,top,Groundout,Héctor Rodríguez grounds out to first baseman Jake Bauers.,False,6403.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,top,Groundout,"Dane Myers grounds out, shortstop Cooper Pratt to first baseman Jake Bauers.",False,6485.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,bottom,Home Run,Jake Bauers homers (26) on a line drive to right center field.,True,6713.6,,,True,Jake Bauers' solo home run (26),40.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/4b340845-5feb6e82-d1f08073-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,bottom,Single,Christian Yelich singles on a ground ball to left fielder JJ Bleday.,False,6789.5,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,bottom,Grounded Into DP,"Joey Ortiz grounds into a double play, third baseman Eugenio Suárez to second baseman Juan Brito to first baseman Sal Stewart. Christian Yelich out at 2nd. Joey Ortiz out at 1st.",False,6889.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,7,bottom,Pop Out,Luis Lara pops out softly to first baseman Sal Stewart in foul territory.,False,6980.4,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,top,Single,Elly De La Cruz singles on a ground ball to right fielder Sal Frelick.,False,7221.8,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,top,Single,Sal Stewart singles on a ground ball to right fielder Sal Frelick. Elly De La Cruz to 3rd.,False,7319.1,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,top,Pop Out,Eugenio Suárez pops out to catcher Gary Sánchez in foul territory.,False,7412.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,top,Sac Fly,Tyler Stephenson out on a sacrifice fly to right fielder Sal Frelick. Elly De La Cruz scores.,True,7508.0,,,True,Tyler Stephenson's sacrifice fly,19.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/f81d5988-696b3e83-9f697bdb-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,top,Strikeout,JJ Bleday strikes out swinging.,False,7680.6,,,True,Strike 2 is confirmed after ABS challenge,22.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/3e2bef93-85f40dfa-04795045-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,bottom,Single,Cooper Pratt singles on a line drive to center fielder Dane Myers.,False,7851.2,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,bottom,Sac Bunt,Sal Frelick hits a sacrifice bunt. Throwing error by pitcher Brock Burke. Cooper Pratt to 2nd. Sal Frelick to 1st.,False,7884.0,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,bottom,Double Play,"Jackson Chourio lines into a double play, pitcher Brock Burke to second baseman Juan Brito. Cooper Pratt out at 2nd.",False,7981.2,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,8,bottom,Caught Stealing 2B,"Sal Frelick caught stealing 2nd base, catcher Jose Trevino to shortstop Elly De La Cruz.",False,8054.2,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,top,Double,"Juan Brito doubles (6) on a line drive to left fielder Jackson Chourio, deflected by center fielder Luis Lara.",False,8272.9,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,top,Fielders Choice Out,"Jose Trevino reaches on a fielder's choice out, first baseman Jake Bauers to third baseman Joey Ortiz. Juan Brito out at 3rd.",False,8321.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,top,Flyout,Héctor Rodríguez flies out sharply to right fielder Sal Frelick.,False,8428.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,top,Walk,Dane Myers walks. Jose Trevino to 2nd.,False,8559.8,,,True,Ball 1 is confirmed after ABS challenge,23.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/72f8e169-09120784-f1b2792a-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,top,Strikeout,Elly De La Cruz strikes out swinging.,False,8739.3,,,True,DL Hall K's Elly De La Cruz to strand two,8.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-10/01/2e9d233d-19b3f329-c2dedcda-csvm-diamondgcp-asset-4000K.mp4
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,bottom,Single,Brice Turang singles on a line drive to center fielder Dane Myers.,False,8962.9,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,bottom,Strikeout,Gary Sánchez called out on strikes.,False,9136.7,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,bottom,Forceout,"Jake Bauers lines into a force out, shortstop Elly De La Cruz to second baseman Juan Brito. Brice Turang out at 2nd. Jake Bauers to 1st.",False,9260.6,,,False,,,
+823734,video/eltaMax10_Reds_Brewers_0913.mp4,9,bottom,Flyout,Christian Yelich flies out to left fielder TJ Friedl in foul territory.,False,9332.3,,,True,TJ Friedl's impressive sliding catch seals the win,21.0,https://mlb-cuts-diamond.mlb.com/FORGE/2026/2026-09/13/99acce19-092777f2-7f6f3770-csvm-diamondgcp-asset_1280x720_59_4000K.mp4
