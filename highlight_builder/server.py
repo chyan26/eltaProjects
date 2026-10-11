@@ -26,6 +26,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 from . import REPO_ROOT
 from .editor import RenderManager, editor_cli, map_errors
+from .procs import group_kwargs, stop_tree
 
 WEB_ROOT = REPO_ROOT / "web"
 # Folders whose videos the page may play (clips and source videos). Nothing else is served.
@@ -91,6 +92,8 @@ class JobRecord:
             self.cond.notify_all()
 
     def apply_event(self, ev: Dict[str, Any]) -> None:
+        if self.status == "cancelled":  # late events from a child that's being stopped
+            return
         kind, step = ev.get("event"), self.step(ev.get("step_id", ""))
         if kind == "step_start" and step:
             self.status = "running"
@@ -164,7 +167,7 @@ class JobManager:
         if job.demo:
             args += ["--demo", "--demo-delay", str(self.demo_delay)]
         job.proc = subprocess.Popen(args, cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE, text=True, encoding="utf-8", start_new_session=True)
+                                    stderr=subprocess.PIPE, text=True, encoding="utf-8", **group_kwargs())
         job.proc.stdin.write(json.dumps(job.request))
         job.proc.stdin.close()
         for line in job.proc.stderr:
@@ -190,12 +193,10 @@ class JobManager:
     def cancel(self, job: JobRecord) -> None:
         if job.status in TERMINAL:
             return
-        if job.proc and job.proc.poll() is None:
-            try:
-                os.killpg(job.proc.pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+        # Mark it cancelled first: _run checks the status as soon as the child exits.
         job.finish("cancelled", None)
+        if job.proc and job.proc.poll() is None:
+            stop_tree(job.proc, signal.SIGTERM)
 
 
 GAME_CACHE_SECONDS = 600
@@ -290,7 +291,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
                     left -= len(chunk)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             pass
 
     def do_HEAD(self) -> None:
@@ -470,7 +471,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 if done:
                     return
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             return
 
 

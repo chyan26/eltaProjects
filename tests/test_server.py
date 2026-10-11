@@ -85,9 +85,17 @@ class ServerTest(unittest.TestCase):
         req["steps"][1]["args"].pop("innings")
         _, job = self.call("POST", "/api/v1/jobs", req)
         time.sleep(0.2)
+        record = server.Handler.manager.jobs[job["id"]]
+        end = time.time() + 10
+        while record.proc is None and time.time() < end:
+            time.sleep(0.05)
+        self.assertIsNotNone(record.proc)
         status, cancelled = self.call("POST", f"/api/v1/jobs/{job['id']}/cancel")
         self.assertEqual(status, 200)
         self.assertEqual(cancelled["status"], "cancelled")
+        record.proc.wait(timeout=5)  # the child is gone, not just marked cancelled
+        self.assertIsNotNone(record.proc.poll())
+        self.assertEqual(self.call("GET", f"/api/v1/jobs/{job['id']}")[1]["status"], "cancelled")
 
     def test_media_supports_ranges_and_blocks_other_paths(self):
         import shutil

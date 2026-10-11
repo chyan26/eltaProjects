@@ -6,15 +6,17 @@ module runs it as a subprocess and maps its results to the Highlight Builder API
 """
 
 import json
-import os
 import secrets
+import shutil
 import signal
 import subprocess
 import sys
 import threading
-from typing import Any, Dict, List, Optional, Tuple
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from . import REPO_ROOT
+from .procs import group_kwargs, stop_tree
 
 # highlight_editor error code -> (HTTP status, Highlight Builder error code)
 ERROR_MAP: Dict[str, Tuple[int, int]] = {
@@ -63,6 +65,27 @@ def new_render_id() -> str:
     return "render_" + secrets.token_hex(10)
 
 
+TEMP_PREFIX = ".highlight_editor_"  # highlight_editor/render.py makes its temp folder next to the output
+
+
+def render_temp_parent(project: Dict[str, Any]) -> Optional[Path]:
+    """The folder where highlight_editor puts its temp directory, or None if unknown."""
+    output = project.get("output")
+    if not isinstance(output, str) or not output:
+        return None
+    return (REPO_ROOT / output).parent
+
+
+def temp_dirs(parent: Optional[Path]) -> Set[Path]:
+    """The ``.highlight_editor_*`` directories directly inside ``parent``."""
+    if parent is None or not parent.is_dir():
+        return set()
+    try:
+        return {p for p in parent.iterdir() if p.name.startswith(TEMP_PREFIX) and p.is_dir() and not p.is_symlink()}
+    except OSError:
+        return set()
+
+
 class RenderRecord:
     """One highlight_editor render. Shape mirrors JobRecord so the SSE stream can reuse it."""
 
@@ -93,6 +116,8 @@ class RenderRecord:
             self.cond.notify_all()
 
     def apply_event(self, ev: Dict[str, Any]) -> None:
+        if self.status == "cancelled":  # late events from a child that's being stopped
+            return
         kind = ev.get("event")
         self.status = "running"
         if kind == "segment_start":
@@ -123,10 +148,12 @@ class RenderManager:
         return render
 
     def _run(self, render: RenderRecord) -> None:
+        temp_parent = render_temp_parent(render.project)
+        temp_before = temp_dirs(temp_parent)
         render.proc = subprocess.Popen(
             [editor_python(), "-m", "highlight_editor", "render", "-", "--base-dir", "."],
             cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", start_new_session=True,
+            text=True, encoding="utf-8", **group_kwargs(),
         )
         render.proc.stdin.write(json.dumps(render.project))
         render.proc.stdin.close()
@@ -142,6 +169,9 @@ class RenderManager:
         render.proc.stdout.close()
         render.proc.stderr.close()
         if render.status == "cancelled":
+            # A forced kill (Windows) skips highlight_editor's cleanup; remove what this render left.
+            for leftover in temp_dirs(temp_parent) - temp_before:
+                shutil.rmtree(leftover, ignore_errors=True)
             return
         try:
             result = json.loads(stdout.strip().splitlines()[-1])
@@ -159,12 +189,11 @@ class RenderManager:
     def cancel(self, render: RenderRecord) -> None:
         if render.status in TERMINAL:
             return
-        if render.proc and render.proc.poll() is None:
-            try:
-                # SIGINT (not SIGTERM) so highlight_editor's finally blocks run and its temp folder is removed.
-                os.killpg(render.proc.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
+        # Mark it cancelled first: _run checks the status as soon as the child exits.
         render.status = "cancelled"
         render.finished_at = self.now()
         render.touch()
+        if render.proc and render.proc.poll() is None:
+            # On POSIX, SIGINT (not SIGTERM) so highlight_editor's finally blocks run and its temp
+            # folder is removed. Windows kills the whole tree, which skips them (see _run).
+            stop_tree(render.proc, signal.SIGINT)
