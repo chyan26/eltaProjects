@@ -23,6 +23,14 @@ from .job import JobValidationError, parse_job, preview
 from .runner import EXIT_INPUT, EXIT_OK, python_executable, run_job
 
 
+def _configure_stdio() -> None:
+    """Always UTF-8, whatever the console code page is (the server reads our output as UTF-8)."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def out(obj: Dict[str, Any], code: int = EXIT_OK) -> int:
     print(json.dumps(obj, ensure_ascii=False))
     return code
@@ -38,6 +46,7 @@ def read_job(source: str):
 
 
 def main(argv=None) -> int:
+    _configure_stdio()
     parser = argparse.ArgumentParser(prog="python -m highlight_builder")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "commands", "run"):

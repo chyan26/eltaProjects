@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import subprocess
 import sys
 import unittest
@@ -115,9 +116,9 @@ class ArgvTest(unittest.TestCase):
 
 
 class CliTest(unittest.TestCase):
-    def run_cli(self, *args, stdin=None):
+    def run_cli(self, *args, stdin=None, env=None):
         p = subprocess.run([sys.executable, "-m", "highlight_builder", *args], input=stdin, capture_output=True,
-                           text=True, cwd=REPO)
+                           text=True, encoding="utf-8", cwd=REPO, env=env)
         return p.returncode, json.loads(p.stdout), p.stderr
 
     def test_commands(self):
@@ -143,6 +144,17 @@ class CliTest(unittest.TestCase):
         self.assertEqual(events[0]["event"], "step_start")
         self.assertEqual(events[-1]["event"], "done")
         self.assertTrue(all(c["masked_path"].endswith("_masked.mp4") for c in out["outputs"]["clips"]))
+
+    def test_output_is_utf8_even_when_the_console_is_not(self):
+        # A Windows console (cp950, cp1252, ...) would crash on "José"; the CLI always writes UTF-8.
+        req = copy.deepcopy(REQUEST)
+        req["steps"][1]["args"].pop("innings")
+        env = {**os.environ, "PYTHONIOENCODING": "ascii"}
+        env.pop("PYTHONUTF8", None)
+        code, out, _ = self.run_cli("run", "-", "--demo", "--demo-delay", "0", stdin=json.dumps(req), env=env)
+        self.assertEqual(code, 0, out)
+        text = json.dumps(out, ensure_ascii=False)
+        self.assertTrue(any(ord(ch) > 127 for ch in text), "expected a non-ASCII character in the result")
 
     def test_demo_run_with_no_matches_fails_with_code(self):
         req = copy.deepcopy(REQUEST)

@@ -126,6 +126,7 @@ def run_process(argv: List[str], step_id: str, on_line: Callable[[str], None]) -
         proc = subprocess.Popen(
             argv, cwd=REPO_ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
             text=True, encoding="utf-8", errors="replace", bufsize=1,
+            env={**os.environ, "PYTHONIOENCODING": "utf-8"},  # the tools print Chinese and accented names
         )
     except FileNotFoundError as exc:
         raise StepFailed(TOOL_FAILED, f"Couldn't start {argv[0]}.", step_id, str(exc)) from exc
