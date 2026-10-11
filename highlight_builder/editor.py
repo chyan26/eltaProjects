@@ -6,15 +6,14 @@ module runs it as a subprocess and maps its results to the Highlight Builder API
 """
 
 import json
-import os
 import secrets
-import signal
 import subprocess
 import sys
 import threading
 from typing import Any, Dict, List, Optional, Tuple
 
 from . import REPO_ROOT
+from .process import group_kwargs, stop_group, utf8_env
 
 # highlight_editor error code -> (HTTP status, Highlight Builder error code)
 ERROR_MAP: Dict[str, Tuple[int, int]] = {
@@ -42,7 +41,8 @@ def editor_cli(args: List[str], stdin: Optional[str] = None, timeout: float = 12
     """Run ``python -m highlight_editor <args> --base-dir .`` from the repo root."""
     proc = subprocess.run(
         [editor_python(), "-m", "highlight_editor", *args, "--base-dir", "."], input=stdin,
-        capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT, timeout=timeout,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=REPO_ROOT, timeout=timeout,
+        env=utf8_env(),
     )
     try:
         return proc.returncode, json.loads(proc.stdout.strip().splitlines()[-1])
@@ -126,7 +126,7 @@ class RenderManager:
         render.proc = subprocess.Popen(
             [editor_python(), "-m", "highlight_editor", "render", "-", "--base-dir", "."],
             cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", start_new_session=True,
+            text=True, encoding="utf-8", errors="replace", env=utf8_env(), **group_kwargs(),
         )
         render.proc.stdin.write(json.dumps(render.project))
         render.proc.stdin.close()
@@ -159,12 +159,9 @@ class RenderManager:
     def cancel(self, render: RenderRecord) -> None:
         if render.status in TERMINAL:
             return
-        if render.proc and render.proc.poll() is None:
-            try:
-                # SIGINT (not SIGTERM) so highlight_editor's finally blocks run and its temp folder is removed.
-                os.killpg(render.proc.pid, signal.SIGINT)
-            except ProcessLookupError:
-                pass
+        if render.proc:
+            # Graceful (SIGINT / CTRL_BREAK) so highlight_editor's finally blocks run and its temp folder is removed.
+            stop_group(render.proc, graceful=True)
         render.status = "cancelled"
         render.finished_at = self.now()
         render.touch()

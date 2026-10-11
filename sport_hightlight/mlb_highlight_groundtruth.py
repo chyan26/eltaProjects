@@ -43,6 +43,7 @@ import subprocess
 import unicodedata
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import List, Optional, Tuple
 
 import cv2
@@ -640,7 +641,7 @@ def main():
 
         rows.append({
             "game_pk": args.game_pk,
-            "video": args.video,
+            "video": Path(args.video).as_posix(),
             "inning": event.inning,
             "half": event.half,
             "event_type": event.event_type,

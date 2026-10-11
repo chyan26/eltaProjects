@@ -52,7 +52,8 @@ def parse_args():
     ap.add_argument("--max-frames", type=int, default=0, help="0 = whole video")
     ap.add_argument("--dino-id", default="IDEA-Research/grounding-dino-tiny")
     ap.add_argument("--sam-id", default="facebook/sam2.1-hiera-small")
-    ap.add_argument("--device", default="auto", choices=["auto", "mps", "cpu"])
+    ap.add_argument("--device", default="auto", choices=["auto", "cuda", "mps", "cpu"],
+                    help="auto picks cuda (NVIDIA), then mps (Apple silicon), then cpu")
     return ap.parse_args()
 
 
@@ -60,7 +61,12 @@ def main():
     args = parse_args()
     device = args.device
     if device == "auto":
-        device = "mps" if torch.backends.mps.is_available() else "cpu"
+        if torch.cuda.is_available():
+            device = "cuda"
+        elif torch.backends.mps.is_available():
+            device = "mps"
+        else:
+            device = "cpu"
     print(f"device: {device}")
 
     processor = AutoProcessor.from_pretrained(args.dino_id)

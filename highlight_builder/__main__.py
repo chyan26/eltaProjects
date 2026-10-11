@@ -37,7 +37,16 @@ def read_job(source: str):
     return parse_job(data)
 
 
+def configure_stdio() -> None:
+    """Windows pipes default to the ANSI code page, not UTF-8; the server reads UTF-8."""
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if reconfigure is not None:
+            reconfigure(encoding="utf-8")
+
+
 def main(argv=None) -> int:
+    configure_stdio()
     parser = argparse.ArgumentParser(prog="python -m highlight_builder")
     sub = parser.add_subparsers(dest="command", required=True)
     for name in ("validate", "commands", "run"):

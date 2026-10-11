@@ -62,7 +62,7 @@ python -m pip install transformers pillow
 python -m pip install git+https://github.com/facebookresearch/sam2.git
 ```
 
-程式會透過 Hugging Face 載入 Grounding DINO 與 SAM 2 預訓練模型，第一次執行時需要網路連線並下載模型權重。macOS 有可用的 MPS 時，`--device auto` 會使用 MPS，否則使用 CPU；也可用 `--device mps` 或 `--device cpu` 指定裝置。
+程式會透過 Hugging Face 載入 Grounding DINO 與 SAM 2 預訓練模型，第一次執行時需要網路連線並下載模型權重。`--device auto` 依序使用 NVIDIA 顯卡（CUDA）、Apple Silicon 的 MPS，都沒有時使用 CPU；也可用 `--device cuda`、`--device mps` 或 `--device cpu` 指定裝置。使用 CUDA 時，請安裝支援 CUDA 的 PyTorch 版本。
 
 ## 產生單一半局 ground truth
 
@@ -334,7 +334,7 @@ python target_mask/mask_flags.py \
 | --- | --- | --- |
 | `--mode` | `blur` | 遮罩效果：`blur`、`pixelate` 或 `debug` |
 | `--prompt` | 中國國旗旗幟與衣物徽章 | Grounding DINO 文字提示；依其慣例使用小寫句子並以句點結尾 |
-| `--device` | `auto` | 運算裝置：`auto`、`mps` 或 `cpu` |
+| `--device` | `auto` | 運算裝置：`auto`、`cuda`、`mps` 或 `cpu` |
 | `--box-thr`、`--text-thr` | `0.10`、`0.10` | 偵測框與文字分數門檻 |
 | `--det-width` | `960` | 偵測與分割使用的縮圖寬度 |
 | `--hold` | `3` | 在當前遮罩之外，合併最多 3 個先前影格的遮罩以減少閃爍 |

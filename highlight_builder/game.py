@@ -110,7 +110,7 @@ def game_from_csv(game_pk: int) -> Dict[str, Any]:
             "official_highlight": str(r.get("is_official_highlight", "")).lower() == "true",
         } for r in rows],
         "source": "local_csv",
-        "source_file": str(path.relative_to(REPO_ROOT)),
+        "source_file": path.relative_to(REPO_ROOT).as_posix(),
     }
 
 
@@ -166,7 +166,7 @@ def list_videos() -> List[Dict[str, Any]]:
         size = path.stat().st_size
         placeholder = size < LFS_PLACEHOLDER_MAX_BYTES
         info = {"duration_seconds": None, "width": None, "height": None} if placeholder else probe(path)
-        out.append({"path": str(path.relative_to(REPO_ROOT)), "size_bytes": size, "lfs_placeholder": placeholder, **info})
+        out.append({"path": path.relative_to(REPO_ROOT).as_posix(), "size_bytes": size, "lfs_placeholder": placeholder, **info})
     return out
 
 
