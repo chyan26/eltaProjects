@@ -6,6 +6,7 @@ import unittest
 import urllib.error
 import urllib.request
 from http.server import ThreadingHTTPServer
+from unittest import mock
 
 from highlight_builder import server
 from tests.test_job import REQUEST
@@ -118,6 +119,36 @@ class ServerTest(unittest.TestCase):
                 ctx.exception.close()
         finally:
             shutil.rmtree(folder)
+
+    def test_media_handles_aborted_client_connection(self):
+        import shutil
+        from highlight_builder import REPO_ROOT
+
+        folder = REPO_ROOT / "sport_hightlight" / "dataset" / "_test_media"
+        folder.mkdir(parents=True, exist_ok=True)
+        try:
+            (folder / "aborted.mp4").write_bytes(bytes(range(256)) * 16)
+            handler = mock.Mock()
+            handler.headers.get.return_value = ""
+            handler.wfile.write.side_effect = ConnectionAbortedError
+
+            server.Handler.serve_media(handler, "sport_hightlight/dataset/_test_media/aborted.mp4")
+
+            handler.wfile.write.assert_called_once()
+        finally:
+            shutil.rmtree(folder)
+
+    def test_events_handles_aborted_client_connection(self):
+        handler = mock.Mock()
+        handler.wfile.write.side_effect = ConnectionAbortedError
+        job = mock.MagicMock()
+        job.status = "running"
+        job.version = 1
+        job.to_json.return_value = {}
+
+        server.Handler.stream(handler, job)
+
+        handler.wfile.write.assert_called_once()
 
     def test_unknown_job(self):
         status, body = self.call("GET", "/api/v1/jobs/job_NOPE")
