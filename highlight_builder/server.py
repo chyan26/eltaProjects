@@ -288,7 +288,7 @@ class Handler(BaseHTTPRequestHandler):
                         break
                     self.wfile.write(chunk)
                     left -= len(chunk)
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             pass
 
     def do_HEAD(self) -> None:
@@ -468,7 +468,7 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.flush()
                 if done:
                     return
-        except (BrokenPipeError, ConnectionResetError):
+        except ConnectionError:
             return
 
 
