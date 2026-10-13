@@ -20,6 +20,10 @@ import requests
 
 
 MLB_SCHEDULE_API = "https://statsapi.mlb.com/api/v1/schedule"
+TEAM_ABBR_ALIASES = {
+    "CWS": {"CHW"},
+    "KC": {"KCR"},
+}
 
 
 def _schedule_games(params: dict) -> List[dict]:
@@ -50,7 +54,13 @@ def _game_summary(game: dict) -> dict:
 
 def _team_matches(query: str, summary: dict, side: str) -> bool:
     q = query.lower()
-    return q == summary[f"{side}_abbr"].lower() or q in summary[side].lower()
+    abbreviation = summary[f"{side}_abbr"].upper()
+    aliases = TEAM_ABBR_ALIASES.get(abbreviation, set())
+    return (
+        q == abbreviation.lower()
+        or q in {alias.lower() for alias in aliases}
+        or q in summary[side].lower()
+    )
 
 
 def find_game_pks(date: str, teams: Optional[List[str]] = None) -> List[dict]:
