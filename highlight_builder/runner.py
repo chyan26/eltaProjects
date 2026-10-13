@@ -26,6 +26,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from . import REPO_ROOT
 from .job import Job, build_argv, mask_output_path
+from .process import utf8_env
 
 Emit = Callable[[Dict[str, Any]], None]
 
@@ -177,7 +178,7 @@ def run_real(job: Job, emit: Emit) -> Dict[str, Any]:
             clips = read_manifest(manifest)
             clips_by_step[sid] = clips
             outputs["clips"] = clips
-            outputs["manifest"] = str(manifest.relative_to(REPO_ROOT))
+            outputs["manifest"] = manifest.relative_to(REPO_ROOT).as_posix()
         elif step["tool"] == "mask_flags":
             source = clips_by_step.get(step["for_each"]["clips_from"], [])
             suffix = step["for_each"].get("output_suffix", "_masked")

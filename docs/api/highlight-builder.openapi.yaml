@@ -688,6 +688,7 @@ components:
             - "null"
           enum:
             - auto
+            - cuda
             - mps
             - cpu
             - null

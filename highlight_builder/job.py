@@ -82,7 +82,7 @@ KIND_MESSAGES = {
     "side_list": "Must be a list of away or home.",
     "inning_range": "Must be an object with from and to, where from is not after to.",
     "mask_mode": "Must be blur or pixelate.",
-    "device": "Must be auto, mps or cpu.",
+    "device": "Must be auto, cuda, mps or cpu.",
 }
 
 
@@ -156,7 +156,7 @@ def _check_kind(kind: str, value: Any) -> bool:
     if kind == "mask_mode":
         return value in ("blur", "pixelate")
     if kind == "device":
-        return value in ("auto", "mps", "cpu")
+        return value in ("auto", "cuda", "mps", "cpu")
     raise ValueError(f"unknown kind {kind}")
 
 

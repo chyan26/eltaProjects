@@ -5,6 +5,7 @@ stdout 一律是單一 JSON 物件；render 的進度以 JSON Lines 輸出到 st
 
 import argparse
 import json
+import signal
 import sys
 from typing import Any, Dict, Optional, Sequence, Tuple
 
@@ -69,6 +70,12 @@ def _print_progress(event: Dict[str, Any]) -> None:
     print(json.dumps(event, ensure_ascii=False), file=sys.stderr, flush=True)
 
 
+def _configure_signals() -> None:
+    """Windows 無法送 SIGINT 給其他程序；後端取消時改送 CTRL_BREAK，同樣以 KeyboardInterrupt 結束，讓暫存目錄被清除。"""
+    if hasattr(signal, "SIGBREAK"):
+        signal.signal(signal.SIGBREAK, signal.default_int_handler)
+
+
 def main(argv: Optional[Sequence[str]] = None) -> int:
     _configure_stdio()
     args = build_parser().parse_args(argv)
@@ -90,4 +97,5 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
 
 
 if __name__ == "__main__":
+    _configure_signals()
     raise SystemExit(main())

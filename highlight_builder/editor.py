@@ -44,7 +44,8 @@ def editor_cli(args: List[str], stdin: Optional[str] = None, timeout: float = 12
     """Run ``python -m highlight_editor <args> --base-dir .`` from the repo root."""
     proc = subprocess.run(
         [editor_python(), "-m", "highlight_editor", *args, "--base-dir", "."], input=stdin,
-        capture_output=True, text=True, encoding="utf-8", cwd=REPO_ROOT, timeout=timeout,
+        capture_output=True, text=True, encoding="utf-8", errors="replace", cwd=REPO_ROOT, timeout=timeout,
+        env=utf8_env(),
     )
     try:
         return proc.returncode, json.loads(proc.stdout.strip().splitlines()[-1])
@@ -153,7 +154,7 @@ class RenderManager:
         render.proc = subprocess.Popen(
             [editor_python(), "-m", "highlight_editor", "render", "-", "--base-dir", "."],
             cwd=REPO_ROOT, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            text=True, encoding="utf-8", **group_kwargs(),
+            text=True, encoding="utf-8", errors="replace", env=utf8_env(), **group_kwargs(),
         )
         render.proc.stdin.write(json.dumps(render.project))
         render.proc.stdin.close()
@@ -189,7 +190,9 @@ class RenderManager:
     def cancel(self, render: RenderRecord) -> None:
         if render.status in TERMINAL:
             return
-        # Mark it cancelled first: _run checks the status as soon as the child exits.
+        if render.proc:
+            # Graceful (SIGINT / CTRL_BREAK) so highlight_editor's finally blocks run and its temp folder is removed.
+            stop_group(render.proc, graceful=True)
         render.status = "cancelled"
         render.finished_at = self.now()
         render.touch()

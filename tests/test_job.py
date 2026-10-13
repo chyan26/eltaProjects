@@ -86,6 +86,15 @@ class ParseJobTest(unittest.TestCase):
             bad["steps"][step]["args"][name] = value
             self.assertIsNotNone(errors_of(bad), name)
 
+    def test_mask_device(self):
+        for device in ("auto", "cuda", "mps", "cpu"):
+            ok = copy.deepcopy(REQUEST)
+            ok["steps"][2]["args"]["device"] = device
+            self.assertIsNone(errors_of(ok), device)
+        bad = copy.deepcopy(REQUEST)
+        bad["steps"][2]["args"]["device"] = "tpu"
+        self.assertIsNotNone(errors_of(bad))
+
     def test_project_path(self):
         self.assertTrue(is_project_path("video/a b.mp4"))
         self.assertFalse(is_project_path(""))

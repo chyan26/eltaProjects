@@ -1,40 +1,36 @@
-# MLB Highlight Ground Truth and Flag Masking
+# MLB 精華影片剪輯與旗幟遮罩
 
-這個專案包含兩部分：
+這個 repository 維護兩個影片處理領域：MLB 精華影片剪輯，以及旗幟遮罩。另有本機網頁介面串接精華剪輯流程，並可呼叫遮罩工具。
 
-1. 整合 MLB 的 `/feed/live` 與 `/content` API，將棒球轉播影片的逐球事件換算成影片時間，並標記 MLB 官方精華，產生 CSV ground truth。
-2. 使用 Grounding DINO 偵測中國國旗、SAM 2 產生遮罩，再將影片中的目標模糊或像素化。
+MLB 資料工具整合 `/feed/live` 與 `/content` API，將逐球事件換算成影片時間並標記官方精華，產生 CSV ground truth。事件切片與 `highlight_editor` 負責從片段裁切、合併輸出；`highlight_builder` 提供本機網頁與流程編排。旗幟遮罩工具使用 Grounding DINO 偵測中國國旗、SAM 2 產生遮罩，再將目標模糊或像素化。
 
 `/feed/live` 提供逐球時間；`/content` 提供官方精華標題、長度與播放 URL。ground truth 程式預設輸出所有事件，官方精華只作為標籤，不會過濾掉普通事件；它不是影片分類模型。
 
 ## 專案結構
-
 ```text
-docs/api/
-├── highlight-builder.openapi.yaml   # 網頁後端 API
-└── highlight-editor.openapi.yaml    # 剪輯後台資料格式
-highlight_builder/                   # 網頁的本機後端
-tests/
-web/                                 # 首頁與工具頁
-sport_hightlight/
-├── csv_data/
-│   ├── bottom2_ground_truth.csv
-│   └── full_game_ground_truth.csv
-├── dataset/
-│   ├── bottom2/
-│   └── full_game/
-│       ├── positive/
-│       ├── hard_negative/
-│       └── manifest.csv
-├── make_clip.py
-└── mlb_highlight_groundtruth.py
-target_mask/
-└── mask_flags.py
-video/
-├── eltaMax10_Reds_Brewers_0913.mp4              # 整場，連續錄影
-├── eltaMax10_Reds_Brewers_0913_bottom2nd.mp4
-└── eltaMax10_Reds_Brewers_0913_top6th.mp4
+.
+├── docs/
+│   ├── api/                          # 網頁 API 與剪輯資料格式
+│   ├── highlight-editor-integration.md
+│   └── superpowers/                  # 設計規格與實作計畫
+├── highlight_builder/                # 本機伺服器、CLI 與流程編排
+├── highlight_editor/                 # 影格精準裁切、驗證與影片合併
+│   ├── tests/
+│   ├── README.md
+│   └── openapi.yaml
+├── sport_hightlight/                 # MLB ground truth 與事件短片產生
+│   ├── csv_data/                     # ground truth CSV
+│   ├── dataset/                      # 事件短片與 manifest
+│   ├── make_clip.py
+│   └── mlb_highlight_groundtruth.py
+├── target_mask/                      # 國旗偵測與遮罩
+│   └── mask_flags.py
+├── tests/                            # 網頁後端與工作流程測試
+├── web/                              # 首頁與工具頁
+└── video/                            # 輸入影片（Git LFS）
 ```
+
+網頁操作路徑為 `web/` → `highlight_builder/` → MLB 工具、`highlight_editor/` 或 `target_mask/`。`highlight_editor` 也可透過 CLI 或 Python API 獨立使用。
 
 影片使用 Git LFS 管理。實際下載影片前，請先安裝並執行：
 
@@ -66,7 +62,7 @@ python -m pip install transformers pillow
 python -m pip install git+https://github.com/facebookresearch/sam2.git
 ```
 
-程式會透過 Hugging Face 載入 Grounding DINO 與 SAM 2 預訓練模型，第一次執行時需要網路連線並下載模型權重。macOS 有可用的 MPS 時，`--device auto` 會使用 MPS，否則使用 CPU；也可用 `--device mps` 或 `--device cpu` 指定裝置。
+程式會透過 Hugging Face 載入 Grounding DINO 與 SAM 2 預訓練模型，第一次執行時需要網路連線並下載模型權重。`--device auto` 依序使用 NVIDIA 顯卡（CUDA）、Apple Silicon 的 MPS，都沒有時使用 CPU；也可用 `--device cuda`、`--device mps` 或 `--device cpu` 指定裝置。使用 CUDA 時，請安裝支援 CUDA 的 PyTorch 版本。
 
 ## 產生單一半局 ground truth
 
@@ -202,18 +198,35 @@ python sport_hightlight/make_clip.py \
 
 ## 網頁介面（Highlight Builder）
 
-`web/` 是挑選事件並產生片段的網頁，`highlight_builder/` 是它的本機後端。瀏覽器本身不能啟動 Python，所以由一個小型 HTTP 伺服器提供網頁，並把每個 API 呼叫轉成 `python -m highlight_builder <指令>` 子程序：結果以一個 JSON 物件印在 stdout，進度以 JSON Lines 印在 stderr，exit code `0` 成功、`1` 輸入錯誤、`2` 工具錯誤（與 `docs/api/highlight-editor.openapi.yaml` 的慣例相同）。後端只用 Python 標準函式庫。
+`web/` 是挑選事件並產生片段的網頁，`highlight_builder/` 是它的本機後端。瀏覽器本身不能啟動 Python，因此由本機 HTTP 伺服器提供網頁，並把 API 呼叫轉成 `python -m highlight_builder <指令>` 子程序：結果以一個 JSON 物件輸出到 stdout，進度以 JSON Lines 輸出到 stderr，exit code `0` 成功、`1` 輸入錯誤、`2` 工具錯誤。剪輯輸出由 `highlight_builder` 呼叫 `highlight_editor` 完成。
 
 ```bash
-python3 -m highlight_builder.server          # http://localhost:8787 ，工具頁在 /app
+python3 -m highlight_builder.server          # http://localhost:8787，工具頁在 /app
 python3 -m highlight_builder.server --demo   # 強制示範模式
 python3 -m highlight_builder.server --real   # 強制實際執行
 ```
 
+### 網頁剪輯流程
+
+```mermaid
+flowchart TD
+  A[啟動本機伺服器] --> B[開啟 localhost:8787/app]
+  B --> C[選擇影片並輸入 game_pk]
+  C --> D[載入比賽事件]
+  D --> E[篩選事件並預覽工作]
+  E --> F[執行 ground truth 與事件切片]
+  F --> G[產生片段與 manifest]
+  G --> H[播放、裁切與排序片段]
+  H --> I[驗證剪輯專案並輸出影片]
+  I --> J[播放 out/ 中的成品]
+```
+
+目前頁面不會自動列出所有可用比賽；載入比賽時需手動輸入 `game_pk`。片段清單會在事件切片工作完成後載入。示範模式只模擬流程，不會建立可播放的片段或成品。
+
 - **示範模式**：沒有安裝 ffmpeg、或 `video/` 裡只有 Git LFS 佔位檔時會自動啟用。執行時走過相同步驟、回報進度，但不呼叫工具、不寫任何檔案，頁面上會標示「示範」。
 - **實際執行**：需要 `git lfs pull` 取得影片、安裝 ffmpeg，以及工具用的 Python 套件（`requests`、`opencv-python`、`numpy`）。後端會自動用專案的 `.venv` 執行工具；要用別的 Python 可設定 `HIGHLIGHT_BUILDER_PYTHON=/path/to/python`。
 - **API 規格**：`docs/api/highlight-builder.openapi.yaml`（OpenAPI 3.1）。後端拒絕未知的工具、未知的參數，以及超出專案資料夾的路徑，而且不透過 shell 執行。
-- **剪輯（US-8）**：目前是示範流程，按鈕可以操作，但不會修改影片；之後接上 `highlight_editor`，串接方式見 [docs/highlight-editor-integration.md](docs/highlight-editor-integration.md)。
+- **剪輯輸出**：頁面可裁切、排序片段並輸出最終影片；`highlight_editor` 負責影格精準剪輯與合併，整合方式見 [docs/highlight-editor-integration.md](docs/highlight-editor-integration.md)。
 
 CLI 也可以直接使用：
 
@@ -321,7 +334,7 @@ python target_mask/mask_flags.py \
 | --- | --- | --- |
 | `--mode` | `blur` | 遮罩效果：`blur`、`pixelate` 或 `debug` |
 | `--prompt` | 中國國旗旗幟與衣物徽章 | Grounding DINO 文字提示；依其慣例使用小寫句子並以句點結尾 |
-| `--device` | `auto` | 運算裝置：`auto`、`mps` 或 `cpu` |
+| `--device` | `auto` | 運算裝置：`auto`、`cuda`、`mps` 或 `cpu` |
 | `--box-thr`、`--text-thr` | `0.10`、`0.10` | 偵測框與文字分數門檻 |
 | `--det-width` | `960` | 偵測與分割使用的縮圖寬度 |
 | `--hold` | `3` | 在當前遮罩之外，合併最多 3 個先前影格的遮罩以減少閃爍 |

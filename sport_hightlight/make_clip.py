@@ -101,6 +101,50 @@ def probe_duration(video_path: Path) -> float:
         raise RuntimeError(f"無法取得影片長度：{video_path}") from exc
 
 
+def detect_speech_pauses(
+    video_path: Path, noise_db: float, min_pause: float, video_duration: float
+) -> List[Tuple[float, float]]:
+    """偵測語音頻段（300–3400 Hz）的停頓區間，回傳 (起, 迄) 秒數；沒有音軌時回傳空串列。"""
+    result = run_command([
+        "ffmpeg", "-hide_banner", "-nostats", "-vn", "-i", str(video_path),
+        "-map", "0:a:0?",
+        "-af", f"highpass=f=300,lowpass=f=3400,silencedetect=n={noise_db}dB:d={min_pause}",
+        "-f", "null", "-",
+    ])
+    pauses: List[Tuple[float, float]] = []
+    start: Optional[float] = None
+    for line in result.stderr.splitlines():
+        match = re.search(r"silence_start:\s*(-?[\d.]+)", line)
+        if match:
+            start = max(float(match.group(1)), 0.0)
+            continue
+        match = re.search(r"silence_end:\s*([\d.]+)", line)
+        if match and start is not None:
+            pauses.append((start, float(match.group(1))))
+            start = None
+    if start is not None:
+        pauses.append((start, video_duration))
+    return pauses
+
+
+def snap_to_pause(
+    requested: float,
+    pauses: Sequence[Tuple[float, float]],
+    low: float,
+    high: float,
+    margin: float = 0.1,
+) -> Optional[float]:
+    """回傳落在停頓內、且在 [low, high] 範圍內離 requested 最近的切點；找不到則回傳 None。"""
+    best: Optional[float] = None
+    for pause_start, pause_end in pauses:
+        if pause_end - pause_start <= 2 * margin:
+            continue
+        point = min(max(requested, pause_start + margin), pause_end - margin)
+        if low <= point <= high and (best is None or abs(point - requested) < abs(best - requested)):
+            best = point
+    return best
+
+
 TEAM_SIDES = ("away", "home")
 
 
@@ -278,6 +322,14 @@ def build_parser() -> argparse.ArgumentParser:
         default="veryfast",
         help="libx264 編碼速度，只對 --encoder libx264 有效；越快檔案越大（預設 veryfast）",
     )
+    parser.add_argument(
+        "--no-snap-speech",
+        action="store_true",
+        help="停用語音停頓對齊；預設會把起訖點移到解說員說話的停頓處，避免切斷人聲",
+    )
+    parser.add_argument("--snap-window", type=float, default=4.0, help="起訖點為避開人聲最多可移動的秒數（預設 4）")
+    parser.add_argument("--pause-db", type=float, default=-35.0, help="判定為停頓的語音頻段音量門檻 dB（預設 -35）")
+    parser.add_argument("--min-pause", type=float, default=0.3, help="停頓至少持續秒數（預設 0.3）")
     filters = parser.add_argument_group("篩選（可組合，不同條件需同時符合）")
     filters.add_argument("--event-types", nargs="+", metavar="TYPE", help="只保留這些 event_type，例如 Strikeout \"Home Run\"")
     filters.add_argument("--batting-team", nargs="+", choices=TEAM_SIDES, help="打擊方：away（上半局）或 home（下半局）")
@@ -324,8 +376,17 @@ def make_clips(args: argparse.Namespace) -> int:
     def report(event: str, clip: Optional[Path] = None) -> None:
         nonlocal finished
         finished += 1
-        extra = {"clip": str(clip)} if clip is not None else {}
+        extra = {"clip": clip.as_posix()} if clip is not None else {}
         emit_progress(progress, event=event, index=finished, total=total, **extra)
+
+    snap_speech = not getattr(args, "no_snap_speech", False)
+    snap_window = getattr(args, "snap_window", 4.0)
+    pauses: List[Tuple[float, float]] = []
+    if snap_speech and selected:
+        print("分析語音停頓，以避免切斷解說...")
+        pauses = detect_speech_pauses(
+            args.video, getattr(args, "pause_db", -35.0), getattr(args, "min_pause", 0.3), video_duration
+        )
 
     manifest_rows: List[Dict[str, str]] = []
     pending: List[Tuple[Path, float, float]] = []
@@ -341,6 +402,23 @@ def make_clips(args: argparse.Namespace) -> int:
         requested_end = event_seconds + args.post_seconds
         clip_start = max(requested_start, 0.0)
         clip_end = min(requested_end, video_duration)
+        start_snapped = end_snapped = ""
+        if pauses:
+            # 起點只能往後移到事件前 1 秒，終點只能往前移到事件後 1 秒，確保事件本身留在片段內
+            new_start = snap_to_pause(
+                clip_start, pauses, max(clip_start - snap_window, 0.0),
+                min(clip_start + snap_window, event_seconds - 1.0),
+            )
+            new_end = snap_to_pause(
+                clip_end, pauses, max(clip_end - snap_window, event_seconds + 1.0),
+                min(clip_end + snap_window, video_duration),
+            )
+            start_snapped = str(new_start is not None)
+            end_snapped = str(new_end is not None)
+            if new_start is not None:
+                clip_start = new_start
+            if new_end is not None:
+                clip_end = new_end
         clip_duration = clip_end - clip_start
         if clip_duration <= 0:
             skipped += 1
@@ -360,11 +438,12 @@ def make_clips(args: argparse.Namespace) -> int:
         else:
             report("clip_done", clip_path)  # already cut earlier; kept as is
 
+        # manifest 會進版控，一律用 / 分隔，Windows 產生的檔案在 macOS／Linux 也能用
         manifest_rows.append({
-            "clip_path": str(clip_path),
+            "clip_path": clip_path.as_posix(),
             "label": label,
             "game_pk": row.get("game_pk", ""),
-            "source_video": str(args.video),
+            "source_video": args.video.as_posix(),
             "inning": row.get("inning", ""),
             "half": row.get("half", ""),
             "event_type": row.get("event_type", ""),
@@ -379,6 +458,8 @@ def make_clips(args: argparse.Namespace) -> int:
             "official_highlight_url": row.get("official_highlight_url", ""),
             "batter": row.get("batter", ""),
             "pitcher": row.get("pitcher", ""),
+            "start_snapped_to_pause": start_snapped,
+            "end_snapped_to_pause": end_snapped,
         })
 
     video_args = video_codec_args(args.encoder, args.preset)
@@ -396,6 +477,7 @@ def make_clips(args: argparse.Namespace) -> int:
         "description", "event_seconds", "event_time_source", "clip_start_seconds",
         "clip_end_seconds", "clip_duration_seconds", "is_official_highlight",
         "official_highlight_title", "official_highlight_url", "batter", "pitcher",
+        "start_snapped_to_pause", "end_snapped_to_pause",
     ]
     with manifest_path.open("w", encoding="utf-8", newline="") as manifest_file:
         writer = csv.DictWriter(manifest_file, fieldnames=manifest_fields)
