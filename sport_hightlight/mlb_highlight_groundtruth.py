@@ -2,347 +2,76 @@
 """
 mlb_highlight_groundtruth.py
 
-產生棒球轉播影片的事件 ground truth 時間軸。
+【影片端 + 串接】把 mlb_events.py 整理好的事件（UTC 時間）對到轉播影片的秒數，輸出最終 CSV。
+
+分工：
+    mlb_events.py                  資料端。抓 API、存快照、整理事件、配對官方精華、篩選事件。
+                                   不依賴 cv2 / numpy，本身就能輸出一份不含影片資訊的事件表。
+    mlb_highlight_groundtruth.py   影片端（本檔）。scorebug anchor 偵測、音訊校準、
+                                   時間偏移量計算，再把事件換算成影片秒數。
 
 流程：
-    1. 從 MLB Stats API 的 /feed/live 取得所有逐球事件與官方時間。
-    2. 從 /content 取得官方精華影片，將其配對到逐球事件並標記。
-    3. 以半局 anchor 將事件時間換算成影片秒數。
-    4. 輸出包含所有事件與官方精華標籤的 CSV。
-
-單一半局模式使用 --auto-anchor 自動找影片起始時間；完整轉播模式則用 --game-offset-seconds
-指定第一個打席在影片中的秒數，連續錄影時全場共用。--audio-calibrate 可在事件
-附近用音訊上升沿提供額外校準值。
+    1. 載入 MLB 資料（優先用快取快照，結果可重現）。
+    2. 取得 anchor：完整轉播用 --game-offset-seconds；單一半局用 --anchor-video-seconds 或 --auto-anchor。
+    3. 以半局 anchor 將事件時間換算成影片秒數；--audio-calibrate 可再用音訊上升沿提供額外校準值。
+    4. 套用事件篩選（--pitcher / --batter / --strikeouts / --key-events-only），輸出 CSV，
+       並在旁邊存一份 <out>.alignment.json 記錄這次對齊用的 offset、anchor 來源與影片資訊。
 
 需求套件：
   pip install requests opencv-python numpy
 
 完整轉播使用方式：
-  python mlb_highlight_groundtruth.py \
-      --game-pk 823734 \
-      --video video/eltaMax10_Reds_Brewers_0913.mp4 \
-      --game-offset-seconds 150.5 \
-      --out sport_hightlight/csv_data/full_game_ground_truth.csv
+  python mlb_highlight_groundtruth.py \\
+      --game-pk 823734 \\
+      --video video/eltaMax10_Reds_Brewers_0913.mp4 \\
+      --game-offset-seconds 150.5 \\
+      --out sport_hightlight/csv_data/823734_ground_truth.csv
 
 單一半局片段使用方式：
-    python mlb_highlight_groundtruth.py \
-            --game-pk 823734 \
-            --video bottom2.mp4 \
-            --clip-inning 2 \
-            --clip-half bottom \
-            --auto-anchor \
-            --out bottom2_ground_truth.csv
+  python mlb_highlight_groundtruth.py \\
+      --game-pk 823734 \\
+      --video bottom2.mp4 \\
+      --clip-inning 2 \\
+      --clip-half bottom \\
+      --auto-anchor \\
+      --out sport_hightlight/csv_data/bottom2_ground_truth.csv
+
+只要某投手的三振、或某個投打對決（可搭配上面任一種模式）：
+  ... --pitcher Skenes --strikeouts
+  ... --pitcher Skenes --batter Alonso
 
 若轉播版型不同，可用 --anchor-video-seconds 手動指定半局起始秒數。
 """
 
 import argparse
-import csv
-import re
+import os
+import shutil
 import subprocess
-import unicodedata
-from dataclasses import dataclass
+import sys
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
-from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional
 
 import cv2
 import numpy as np
-import requests
 
-
-MLB_API_TEMPLATE = "https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
-MLB_CONTENT_API_TEMPLATE = "https://statsapi.mlb.com/api/v1/game/{game_pk}/content"
-
-
-# --------------------------------------------------------------------------
-# 1. 從 MLB Stats API 撈取官方逐球資料
-# --------------------------------------------------------------------------
-
-@dataclass
-class HalfInningMarker:
-    inning: int
-    half: str  # "top" or "bottom"
-    start_time: datetime  # UTC
-
-
-@dataclass
-class GameEvent:
-    inning: int
-    half: str
-    description: str
-    event_type: str
-    is_scoring_play: bool
-    event_time: datetime  # UTC，該球（play event）發生的精確時間
-    batter: str = ""
-    pitcher: str = ""
-
-
-@dataclass
-class OfficialHighlight:
-    highlight_id: str
-    title: str
-    description: str
-    duration_seconds: Optional[float]
-    playback_url: str
-    inning: Optional[int]
-    half: Optional[str]
-    slug: str = ""  # content 的 id，多半是 play 描述或「投手-in-play-打者」
-    players: Tuple[str, ...] = ()
-
-
-def fetch_game_feed(game_pk: int) -> dict:
-    url = MLB_API_TEMPLATE.format(game_pk=game_pk)
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def fetch_game_content(game_pk: int) -> dict:
-    url = MLB_CONTENT_API_TEMPLATE.format(game_pk=game_pk)
-    resp = requests.get(url, timeout=30)
-    resp.raise_for_status()
-    return resp.json()
-
-
-def _walk_dicts(value):
-    if isinstance(value, dict):
-        yield value
-        for child in value.values():
-            yield from _walk_dicts(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _walk_dicts(child)
-
-
-def _parse_duration(duration: Optional[str]) -> Optional[float]:
-    if not duration:
-        return None
-    match = re.fullmatch(r"(?:(\d+):)?(\d+):(\d+(?:\.\d+)?)", duration)
-    if not match:
-        return None
-    hours, minutes, seconds = match.groups()
-    return int(hours or 0) * 3600 + int(minutes) * 60 + float(seconds)
-
-
-def _parse_inning(text: str) -> Tuple[Optional[int], Optional[str]]:
-    match = re.search(
-        r"\b(top|bottom) of the (\d+)(?:st|nd|rd|th)\b|"
-        r"\b(top|bottom) (\d+)(?:st|nd|rd|th)\b|"
-        r"\bin the (\d+)(?:st|nd|rd|th)\b",
-        text.lower(),
-    )
-    if not match:
-        return None, None
-    half = match.group(1) or match.group(3)
-    inning = match.group(2) or match.group(4) or match.group(5)
-    return int(inning), half
-
-
-def _playback_url(playbacks: list) -> str:
-    preferred = ("mp4Avc", "hlsCloud", "HTTP_CLOUD_WIRED")
-    for name in preferred:
-        for playback in playbacks or []:
-            if playback.get("name") == name and playback.get("url"):
-                return playback["url"]
-    return ""
-
-
-def extract_official_highlights(
-    content: dict,
-    game_pk: int,
-) -> List[OfficialHighlight]:
-    highlights: List[OfficialHighlight] = []
-    seen = set()
-    for item in _walk_dicts(content):
-        if item.get("type") != "video" or not item.get("id"):
-            continue
-        keywords = item.get("keywordsAll") or []
-        keyword_values = {str(k.get("value", "")).lower() for k in keywords}
-        if f"gamepk-{game_pk}" not in keyword_values:
-            continue
-        if not {"highlight", "in-game-highlight"}.intersection(keyword_values):
-            continue
-        highlight_id = str(item["id"])
-        if highlight_id in seen:
-            continue
-        seen.add(highlight_id)
-        title = item.get("headline") or item.get("title") or ""
-        description = item.get("description") or item.get("blurb") or ""
-        inning, half = _parse_inning(f"{title} {description}")
-        highlights.append(OfficialHighlight(
-            highlight_id=highlight_id,
-            title=title,
-            description=description,
-            duration_seconds=_parse_duration(item.get("duration")),
-            playback_url=_playback_url(item.get("playbacks", [])),
-            inning=inning,
-            half=half,
-            slug=highlight_id,
-            players=tuple(
-                str(k.get("displayName", "")) for k in keywords
-                if k.get("type") == "player_id"
-            ),
-        ))
-    return highlights
-
-
-def _normalise_text(text: str) -> str:
-    text = unicodedata.normalize("NFKD", text)
-    return "".join(char for char in text if not unicodedata.combining(char)).lower()
-
-
-def _tokens(text: str) -> List[str]:
-    return re.findall(r"[a-z0-9]+", _normalise_text(text))
-
-
-def _contains(tokens: List[str], sub: List[str]) -> bool:
-    n = len(sub)
-    return n > 0 and any(tokens[i:i + n] == sub for i in range(len(tokens) - n + 1))
-
-
-def _slug_matches_description(slug: List[str], desc: List[str]) -> bool:
-    """slug 是 play 描述的開頭；結尾字可能被截斷，後面可能多出雜湊碼。"""
-    matched = 0
-    for s, d in zip(slug, desc):
-        if s == d:
-            matched += 1
-        else:
-            matched += d.startswith(s)
-            break
-    return matched >= 4 and len(slug) - matched <= 2
-
-
-def _match_score(event: GameEvent, highlight: OfficialHighlight) -> int:
-    """依官方精華 id 與球員關鍵字比對 play；0 表示不配對。"""
-    if highlight.inning is not None and highlight.inning != event.inning:
-        return 0
-    if highlight.half is not None and highlight.half != event.half:
-        return 0
-
-    slug = _tokens(highlight.slug)
-    desc = _tokens(event.description)
-    pitcher = _tokens(event.pitcher)
-    desc_prefix = _slug_matches_description(slug, desc)
-    batter_in_slug = _contains(slug, _tokens(event.batter))
-    if not (desc_prefix or batter_in_slug):
-        return 0
-
-    score = 4 if desc_prefix else 0
-    score += 2 if batter_in_slug else 0
-    score += 2 if _contains(slug, pitcher) else 0
-    for name in highlight.players:
-        name_tokens = _tokens(name)
-        if name_tokens == pitcher or _contains(desc, name_tokens):
-            score += 1
-    if "strike" in slug and "strikeout" in event.event_type.lower():
-        score += 1
-    return score
-
-
-def assign_official_highlights(
-    events: List[GameEvent],
-    highlights: List[OfficialHighlight],
-) -> List[Optional[OfficialHighlight]]:
-    """每支官方精華只指派給分數最高的事件；同分視為無法判定。"""
-    assigned: List[Optional[OfficialHighlight]] = [None] * len(events)
-    assigned_scores = [0] * len(events)
-    for highlight in highlights:
-        scores = [_match_score(event, highlight) for event in events]
-        best_score = max(scores, default=0)
-        if best_score == 0 or scores.count(best_score) > 1:
-            continue
-        best_index = scores.index(best_score)
-        if assigned_scores[best_index] >= best_score:
-            continue
-        assigned[best_index] = highlight
-        assigned_scores[best_index] = best_score
-    return assigned
-
-
-def parse_iso(ts: str) -> datetime:
-    # MLB API 的時間格式類似 "2026-09-13T19:12:03.000Z"
-    return datetime.strptime(ts, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=timezone.utc)
-
-
-def extract_half_inning_markers(feed: dict) -> List[HalfInningMarker]:
-    """從 allPlays 裡抓出每個半局第一個打席的開始時間，當作該半局的錨點時間。"""
-    markers: List[HalfInningMarker] = []
-    seen = set()
-    all_plays = feed["liveData"]["plays"]["allPlays"]
-    for play in all_plays:
-        about = play["about"]
-        inning = about["inning"]
-        half = about.get("halfInning", "top")  # "top" 或 "bottom"
-        key = (inning, half)
-        if key in seen:
-            continue
-        seen.add(key)
-        start_time_str = about.get("startTime")
-        if not start_time_str:
-            continue
-        markers.append(HalfInningMarker(
-            inning=inning,
-            half=half,
-            start_time=parse_iso(start_time_str),
-        ))
-    markers.sort(key=lambda m: m.start_time)
-    return markers
-
-
-def extract_key_events(
-    feed: dict,
-    keywords: Tuple[str, ...] = ("home run",),
-    include_all_events: bool = True,
-) -> List[GameEvent]:
-    """抓出全壘打／得分事件的精確時間（用該球的 playEvents.startTime，而非整個打席的時間）。"""
-    events: List[GameEvent] = []
-    all_plays = feed["liveData"]["plays"]["allPlays"]
-    for play in all_plays:
-        about = play["about"]
-        inning = about["inning"]
-        half = about.get("halfInning", "top")
-        result = play.get("result", {})
-        event_name = result.get("event", "")
-        is_scoring = bool(about.get("isScoringPlay", False))
-
-        matched = (
-            include_all_events
-            or is_scoring
-            or any(k.lower() in event_name.lower() for k in keywords)
-        )
-        if not matched:
-            continue
-
-        # 找這個打席裡「造成結果」的那一球精確時間：優先用最後一個 isPitch 的 playEvent
-        event_time = None
-        for pe in reversed(play.get("playEvents", [])):
-            if pe.get("isPitch") and pe.get("startTime"):
-                event_time = parse_iso(pe["startTime"])
-                break
-        if event_time is None:
-            # 退而求其次，用打席的 about.endTime
-            end_time_str = about.get("endTime")
-            if not end_time_str:
-                continue
-            event_time = parse_iso(end_time_str)
-
-        events.append(GameEvent(
-            inning=inning,
-            half=half,
-            description=result.get("description", event_name),
-            event_type=event_name or ("Scoring Play" if is_scoring else "Unknown"),
-            is_scoring_play=is_scoring,
-            event_time=event_time,
-            batter=play.get("matchup", {}).get("batter", {}).get("fullName", ""),
-            pitcher=play.get("matchup", {}).get("pitcher", {}).get("fullName", ""),
-        ))
-    events.sort(key=lambda e: e.event_time)
-    return events
+from mlb_events import (
+    DEFAULT_CACHE_DIR,
+    GameData,
+    GameEvent,
+    HalfInningMarker,
+    add_selection_args,
+    ensure_parent_dir,
+    format_iso,
+    load_game_data,
+    select_from_args,
+    write_csv_atomic,
+    write_json_atomic,
+)
 
 
 # --------------------------------------------------------------------------
-# 2. 在影片中偵測 live scorebug 出現的時間點
+# 1. 在影片中偵測 live scorebug 出現的時間點
 # --------------------------------------------------------------------------
 
 def _has_live_scorebug(frame: np.ndarray) -> bool:
@@ -406,35 +135,6 @@ def find_live_scorebug_edges(
     return edges
 
 
-# --------------------------------------------------------------------------
-# 3. 配對官方半局時間與影片偵測時間點，計算偏移量
-# --------------------------------------------------------------------------
-
-@dataclass
-class InningOffset:
-    inning: int
-    half: str
-    offset_seconds: float  # video_time = api_time_epoch_seconds + offset
-
-
-def offset_for_event(offsets: List[InningOffset], event: GameEvent) -> Optional[float]:
-    for o in offsets:
-        if o.inning == event.inning and o.half == event.half:
-            return o.offset_seconds
-    return None
-
-
-def marker_for_half(
-    markers: List[HalfInningMarker],
-    inning: int,
-    half: str,
-) -> HalfInningMarker:
-    for marker in markers:
-        if marker.inning == inning and marker.half == half:
-            return marker
-    raise ValueError(f"找不到第 {inning} 局 {half} 的 MLB API 半局標記")
-
-
 def detect_clip_anchor_in_video(
     video_path: str,
     search_seconds: float = 180.0,
@@ -457,14 +157,25 @@ def detect_clip_anchor_in_video(
     return edges[0]
 
 
+# --------------------------------------------------------------------------
+# 2. 音訊校準
+# --------------------------------------------------------------------------
+
+@dataclass
+class AudioCalibration:
+    seconds: float         # 校準後的影片秒數
+    strength: float        # 上升沿強度（log-RMS 增量）；越大越明顯，太小代表可能只是雜訊
+    at_window_edge: bool   # 峰值落在搜尋視窗邊緣：真正的事件可能在視窗之外，請存疑
+
+
 def calibrate_event_with_audio(
     video_path: str,
     predicted_seconds: float,
     search_before: float = 2.0,
     search_after: float = 2.0,
     sample_rate: int = 16000,
-) -> Optional[float]:
-    """在 API 預測時間附近尋找音訊能量上升沿，回傳校準後影片秒數。"""
+) -> Optional[AudioCalibration]:
+    """在 API 預測時間附近尋找音訊能量上升沿；找不到任何上升沿時回傳 None。"""
     start_seconds = max(predicted_seconds - search_before, 0.0)
     duration_seconds = search_before + search_after
     command = [
@@ -509,17 +220,211 @@ def calibrate_event_with_audio(
     log_rms = np.log(rms + 1e-6)
     onset = np.maximum(np.diff(log_rms, prepend=log_rms[0]), 0.0)
     peak_index = int(np.argmax(onset))
+    strength = float(onset[peak_index])
+    if strength <= 0.0:
+        return None  # 視窗內完全沒有上升沿（例如靜音）：不要回傳一個假的峰值
+
     peak_seconds = start_seconds + (peak_index * hop_size + frame_size / 2) / sample_rate
-    return peak_seconds
+    window_end = start_seconds + samples.size / sample_rate
+    edge_margin = 0.1
+    at_edge = (peak_seconds - start_seconds) < edge_margin or (window_end - peak_seconds) < edge_margin
+    return AudioCalibration(seconds=peak_seconds, strength=strength, at_window_edge=at_edge)
 
 
 # --------------------------------------------------------------------------
-# 4. 主流程
+# 3. 對齊：配對官方半局時間與影片時間點，計算偏移量
 # --------------------------------------------------------------------------
 
-def main():
+@dataclass
+class InningOffset:
+    inning: int
+    half: str
+    offset_seconds: float  # video_time = api_time_epoch_seconds + offset
+
+
+@dataclass
+class VideoInfo:
+    path: str
+    size_bytes: int
+    fps: float
+    frame_count: int
+    duration_seconds: Optional[float]
+
+
+@dataclass
+class Alignment:
+    method: str  # manual-full / manual-clip / auto-clip
+    anchor_video_seconds: float
+    anchor_inning: int
+    anchor_half: str
+    anchor_api_time: datetime
+    offsets: List[InningOffset]
+
+
+def probe_video(video_path: str) -> VideoInfo:
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        raise RuntimeError(f"無法開啟影片：{video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    cap.release()
+    duration = frame_count / fps if fps > 0 and frame_count > 0 else None
+    return VideoInfo(
+        path=video_path,
+        size_bytes=os.path.getsize(video_path),
+        fps=fps,
+        frame_count=frame_count,
+        duration_seconds=duration,
+    )
+
+
+def offset_for_event(offsets: List[InningOffset], event: GameEvent) -> Optional[float]:
+    for o in offsets:
+        if o.inning == event.inning and o.half == event.half:
+            return o.offset_seconds
+    return None
+
+
+def marker_for_half(
+    markers: List[HalfInningMarker],
+    inning: int,
+    half: str,
+) -> HalfInningMarker:
+    for marker in markers:
+        if marker.inning == inning and marker.half == half:
+            return marker
+    raise ValueError(f"找不到第 {inning} 局 {half} 的 MLB API 半局標記")
+
+
+def compute_alignment(args: argparse.Namespace, data: GameData) -> Alignment:
+    if args.clip_inning is not None:
+        marker = marker_for_half(data.markers, args.clip_inning, args.clip_half)
+        if args.auto_anchor:
+            anchor = detect_clip_anchor_in_video(args.video)
+            method = "auto-clip"
+            print(f"      自動偵測到片段 anchor：影片 {anchor:.1f} 秒")
+        else:
+            anchor = args.anchor_video_seconds
+            method = "manual-clip"
+        anchor_source = "自動偵測" if args.auto_anchor else "人工"
+        print(
+            f"[2/4] 使用第 {args.clip_inning} 局 {args.clip_half} 的{anchor_source} anchor "
+            f"（影片 {anchor:.1f} 秒）"
+        )
+        print("[3/4] 依指定半局計算時間偏移量...")
+        offsets = [InningOffset(
+            inning=marker.inning,
+            half=marker.half,
+            offset_seconds=anchor - marker.start_time.timestamp(),
+        )]
+        return Alignment(method, anchor, marker.inning, marker.half, marker.start_time, offsets)
+
+    print(f"[2/4] 完整影片模式：第一個打席位於影片 {args.game_offset_seconds:.1f} 秒")
+    if not data.markers:
+        raise RuntimeError("API 資料中沒有任何半局標記，無法對齊（比賽是否已開打？）")
+    first = data.markers[0]
+    if (first.inning, first.half) != (1, "top"):
+        raise RuntimeError(
+            f"最早的半局標記是第 {first.inning} 局 {first.half}，不是第 1 局上半；"
+            "第 1 局上半的第一個打席可能缺少 startTime，無法用它當全場 anchor"
+        )
+    print("[3/4] 全場共用同一個時間偏移量...")
+    game_offset = args.game_offset_seconds - first.start_time.timestamp()
+    # 偏移量全場共用，所以涵蓋事件出現過的每個半局（不受個別半局標記缺漏影響）
+    halves = sorted({(e.inning, e.half) for e in data.events}, key=lambda ih: (ih[0], ih[1] != "top"))
+    offsets = [InningOffset(inning=i, half=h, offset_seconds=game_offset) for i, h in halves]
+    return Alignment(
+        "manual-full", args.game_offset_seconds, first.inning, first.half, first.start_time, offsets
+    )
+
+
+# --------------------------------------------------------------------------
+# 4. 輸出
+# --------------------------------------------------------------------------
+
+# 前 16 欄與原版相同（順序不變），其餘為新增欄位
+OUTPUT_FIELDS = [
+    "game_pk", "video", "inning", "half", "event_type", "description",
+    "is_scoring_play", "predicted_video_seconds",
+    "audio_calibrated_video_seconds", "audio_offset_seconds",
+    "is_official_highlight", "official_highlight_title",
+    "official_highlight_duration", "official_highlight_url",
+    "batter", "pitcher",
+    # 新增
+    "at_bat_index", "batter_id", "pitcher_id",
+    "event_time_utc", "time_source",
+    "offset_seconds", "alignment_method", "in_video_range",
+    "audio_onset_strength", "audio_at_window_edge",
+    "highlight_status",
+]
+
+
+def build_rows(
+    args: argparse.Namespace,
+    events: List[GameEvent],
+    alignment: Alignment,
+    video: VideoInfo,
+) -> List[dict]:
+    rows = []
+    for event in events:
+        offset = offset_for_event(alignment.offsets, event)
+        predicted = event.event_time.timestamp() + offset if offset is not None else None
+
+        in_range = ""
+        if predicted is not None and video.duration_seconds is not None:
+            in_range = 0.0 <= predicted <= video.duration_seconds
+
+        audio = None
+        if args.audio_calibrate and predicted is not None and in_range is not False:
+            audio = calibrate_event_with_audio(
+                args.video,
+                predicted,
+                search_before=args.audio_search_before,
+                search_after=args.audio_search_after,
+            )
+
+        highlight = event.highlight
+        rows.append({
+            "game_pk": args.game_pk,
+            "video": args.video,
+            "inning": event.inning,
+            "half": event.half,
+            "event_type": event.event_type,
+            "description": event.description,
+            "is_scoring_play": event.is_scoring_play,
+            "predicted_video_seconds": f"{predicted:.2f}" if predicted is not None else "",
+            "audio_calibrated_video_seconds": f"{audio.seconds:.2f}" if audio is not None else "",
+            "audio_offset_seconds": (
+                f"{audio.seconds - predicted:.2f}" if audio is not None and predicted is not None else ""
+            ),
+            "is_official_highlight": event.highlight_status == "matched",
+            "official_highlight_title": highlight.title if highlight is not None else "",
+            "official_highlight_duration": (
+                f"{highlight.duration_seconds:.1f}"
+                if highlight is not None and highlight.duration_seconds is not None
+                else ""
+            ),
+            "official_highlight_url": highlight.playback_url if highlight is not None else "",
+            "batter": event.batter,
+            "pitcher": event.pitcher,
+            "at_bat_index": "" if event.at_bat_index is None else event.at_bat_index,
+            "batter_id": "" if event.batter_id is None else event.batter_id,
+            "pitcher_id": "" if event.pitcher_id is None else event.pitcher_id,
+            "event_time_utc": format_iso(event.event_time),
+            "time_source": event.time_source,
+            "offset_seconds": f"{offset:.3f}" if offset is not None else "",
+            "alignment_method": alignment.method,
+            "in_video_range": in_range,
+            "audio_onset_strength": f"{audio.strength:.3f}" if audio is not None else "",
+            "audio_at_window_edge": audio.at_window_edge if audio is not None else "",
+            "highlight_status": event.highlight_status,
+        })
+    return rows
+
+
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="自動產生棒球轉播影片的精華事件 ground truth 時間軸")
-    parser.add_argument("--game-pk", type=int, required=True, help="MLB Stats API 的 game_pk（例如 823734）")
+    parser.add_argument("--game-pk", type=int, required=True, help="MLB Stats API 的 game_pk（例如 823734）；可用 mlb_game_lookup.py 由日期與球隊查詢")
     parser.add_argument("--video", type=str, required=True, help="轉播影片檔案路徑")
     parser.add_argument(
         "--game-offset-seconds",
@@ -555,18 +460,14 @@ def main():
         default=2.0,
         help="音訊校準搜尋事件後幾秒（預設 2）",
     )
-    parser.add_argument(
-        "--keywords", type=str, nargs="*", default=["home run"],
-        help="除了 isScoringPlay 之外，額外用事件描述關鍵字篩選（預設只抓全壘打）",
-    )
-    parser.add_argument(
-        "--key-events-only",
-        action="store_true",
-        help="只輸出得分/關鍵字事件；預設輸出所有打席事件",
-    )
+    parser.add_argument("--cache-dir", type=str, default=DEFAULT_CACHE_DIR, help="原始 API 快照目錄（預設 mlb_cache）")
+    parser.add_argument("--refresh", action="store_true", help="忽略快取，重新向 API 抓取並覆寫快照")
+    add_selection_args(parser)
     parser.add_argument("--out", type=str, default="ground_truth.csv", help="輸出 CSV 路徑")
-    args = parser.parse_args()
+    return parser
 
+
+def validate_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.clip_inning is None and (args.clip_half is not None or args.anchor_video_seconds is not None or args.auto_anchor):
         parser.error("片段參數必須搭配 --clip-inning")
     if args.clip_inning is not None and args.clip_half is None:
@@ -577,120 +478,74 @@ def main():
         parser.error("片段模式必須提供 --anchor-video-seconds 或 --auto-anchor")
     if args.clip_inning is None and args.game_offset_seconds is None:
         parser.error("完整影片模式必須提供 --game-offset-seconds")
+    if args.audio_calibrate and shutil.which("ffmpeg") is None:
+        parser.error("--audio-calibrate 需要 ffmpeg，但在 PATH 中找不到")
 
-    print(f"[1/4] 向 MLB Stats API 撈取 game_pk={args.game_pk} 的逐球資料...")
-    feed = fetch_game_feed(args.game_pk)
-    markers = extract_half_inning_markers(feed)
-    events = extract_key_events(
-        feed,
-        keywords=tuple(args.keywords),
-        include_all_events=not args.key_events_only,
-    )
-    print(f"      取得 {len(markers)} 個半局起始時間、{len(events)} 個候選精華事件")
-    content = fetch_game_content(args.game_pk)
-    official_highlights = extract_official_highlights(content, args.game_pk)
-    print(f"      content API 取得 {len(official_highlights)} 個官方精華影片")
 
+def main():
+    parser = build_parser()
+    args = parser.parse_args()
+    validate_args(parser, args)
+
+    # 先做便宜的檢查：影片打不開、輸出路徑建不起來，都不要等到跑完才發現
+    ensure_parent_dir(args.out)
+    video = probe_video(args.video)
+
+    print(f"[1/4] 載入 game_pk={args.game_pk} 的 MLB 資料...")
+    data = load_game_data(args.game_pk, args.cache_dir, args.refresh)
+
+    alignment = compute_alignment(args, data)
+
+    events = data.events
     if args.clip_inning is not None:
-        marker = marker_for_half(markers, args.clip_inning, args.clip_half)
-        if args.auto_anchor:
-            args.anchor_video_seconds = detect_clip_anchor_in_video(args.video)
-            print(
-                f"      自動偵測到片段 anchor：影片 {args.anchor_video_seconds:.1f} 秒"
-            )
-        anchor_source = "自動偵測" if args.auto_anchor else "人工"
-        print(
-            f"[2/4] 使用第 {args.clip_inning} 局 {args.clip_half} 的{anchor_source} anchor "
-            f"（影片 {args.anchor_video_seconds:.1f} 秒）"
-        )
-        print("[3/4] 依指定半局計算時間偏移量...")
-        offsets = [InningOffset(
-            inning=marker.inning,
-            half=marker.half,
-            offset_seconds=args.anchor_video_seconds - marker.start_time.timestamp(),
-        )]
-        events = [
-            event for event in events
-            if event.inning == args.clip_inning and event.half == args.clip_half
-        ]
-    else:
-        print(f"[2/4] 完整影片模式：第一個打席位於影片 {args.game_offset_seconds:.1f} 秒")
-        print("[3/4] 全場共用同一個時間偏移量...")
-        game_offset = args.game_offset_seconds - markers[0].start_time.timestamp()
-        offsets = [
-            InningOffset(inning=m.inning, half=m.half, offset_seconds=game_offset)
-            for m in markers
-        ]
+        events = [e for e in events if e.inning == args.clip_inning and e.half == args.clip_half]
+    events = select_from_args(events, args)
 
-    print(f"[4/4] 套用偏移量，換算所有精華事件的影片秒數，輸出至 {args.out} ...")
-    rows = []
-    assigned_highlights = assign_official_highlights(events, official_highlights)
-    for event, official_highlight in zip(events, assigned_highlights):
-        offset = offset_for_event(offsets, event)
-        predicted_video_time = (
-            event.event_time.timestamp() + offset if offset is not None else None
-        )
-        audio_calibrated_time = None
-        if args.audio_calibrate and predicted_video_time is not None:
-            audio_calibrated_time = calibrate_event_with_audio(
-                args.video,
-                predicted_video_time,
-                search_before=args.audio_search_before,
-                search_after=args.audio_search_after,
-            )
+    print(f"[4/4] 套用偏移量，換算 {len(events)} 筆事件的影片秒數，輸出至 {args.out} ...")
+    rows = build_rows(args, events, alignment, video)
+    write_csv_atomic(args.out, OUTPUT_FIELDS, rows)
 
-        rows.append({
-            "game_pk": args.game_pk,
-            "video": Path(args.video).as_posix(),
-            "inning": event.inning,
-            "half": event.half,
-            "event_type": event.event_type,
-            "description": event.description,
-            "is_scoring_play": event.is_scoring_play,
-            "predicted_video_seconds": (
-                f"{predicted_video_time:.1f}" if predicted_video_time is not None else ""
-            ),
-            "audio_calibrated_video_seconds": (
-                f"{audio_calibrated_time:.1f}" if audio_calibrated_time is not None else ""
-            ),
-            "audio_offset_seconds": (
-                f"{audio_calibrated_time - predicted_video_time:.1f}"
-                if audio_calibrated_time is not None and predicted_video_time is not None
-                else ""
-            ),
-            "is_official_highlight": official_highlight is not None,
-            "official_highlight_title": (
-                official_highlight.title if official_highlight is not None else ""
-            ),
-            "official_highlight_duration": (
-                f"{official_highlight.duration_seconds:.1f}"
-                if official_highlight is not None and official_highlight.duration_seconds is not None
-                else ""
-            ),
-            "official_highlight_url": (
-                official_highlight.playback_url if official_highlight is not None else ""
-            ),
-            "batter": event.batter,
-            "pitcher": event.pitcher,
-        })
-
-    with open(args.out, "w", newline="", encoding="utf-8-sig") as f:
-        writer = csv.DictWriter(f, fieldnames=[
-            "game_pk", "video", "inning", "half", "event_type", "description",
-            "is_scoring_play", "predicted_video_seconds",
-            "audio_calibrated_video_seconds", "audio_offset_seconds",
-            "is_official_highlight", "official_highlight_title",
-            "official_highlight_duration", "official_highlight_url",
-            "batter", "pitcher",
-        ])
-        writer.writeheader()
-        writer.writerows(rows)
+    sidecar = os.path.splitext(args.out)[0] + ".alignment.json"
+    write_json_atomic(sidecar, {
+        "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "argv": sys.argv[1:],
+        "game_pk": args.game_pk,
+        "api_snapshot_fetched_at": data.fetched_at,
+        "api_game_state": data.game_state,
+        "video": asdict(video),
+        "alignment": {
+            "method": alignment.method,
+            "anchor_video_seconds": alignment.anchor_video_seconds,
+            "anchor_inning": alignment.anchor_inning,
+            "anchor_half": alignment.anchor_half,
+            "anchor_api_time_utc": format_iso(alignment.anchor_api_time),
+            "offsets": [asdict(o) for o in alignment.offsets],
+        },
+        "audio_calibrate": {
+            "enabled": args.audio_calibrate,
+            "search_before": args.audio_search_before,
+            "search_after": args.audio_search_after,
+        },
+        "selection": {
+            "pitcher": args.pitcher,
+            "batter": args.batter,
+            "strikeouts": args.strikeouts,
+            "key_events_only": args.key_events_only,
+            "keywords": args.keywords,
+        },
+        "rows": len(rows),
+    })
 
     matched = sum(1 for r in rows if r["predicted_video_seconds"])
-    calibrated = sum(1 for r in rows if r["audio_calibrated_video_seconds"])
+    out_of_range = sum(1 for r in rows if r["in_video_range"] is False)
     print(f"完成！共輸出 {len(rows)} 筆事件，{matched} 筆成功換算出影片秒數。")
+    if out_of_range:
+        print(f"      警告：{out_of_range} 筆事件的預測秒數落在影片長度之外，請檢查 offset 是否正確。")
     if args.audio_calibrate:
-        print(f"      音訊校準完成 {calibrated} 筆事件。")
+        calibrated = sum(1 for r in rows if r["audio_calibrated_video_seconds"])
+        edge = sum(1 for r in rows if r["audio_at_window_edge"] is True)
+        print(f"      音訊校準完成 {calibrated} 筆事件（其中 {edge} 筆峰值落在搜尋視窗邊緣，建議存疑）。")
+    print(f"      對齊資訊已存至 {sidecar}")
 
 
 if __name__ == "__main__":
