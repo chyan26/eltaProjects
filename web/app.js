@@ -31,7 +31,7 @@
     halfInning: 2, halfSide: "bottom", autoAnchor: true, anchorSeconds: "", audio: true,
     types: ["Strikeout", "Home Run"], teams: [], role: "bat", batters: [], pitchers: [],
     innFrom: 1, innTo: 9, scoring: false, official: false, pre: 8, post: 12, outDir: "", outEdited: false,
-    overwrite: false, blur: false, blurMode: "blur", view: "multi", showCmds: false, lastJobId: null,
+    overwrite: false, blur: false, blurMode: "blur", view: "multi", showCmds: false, lastJobId: null, lastRunVideo: "", lastRunScope: "",
   };
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(STORE) || "{}"); } catch (e) { saved = {}; }
@@ -116,18 +116,28 @@
     return parts;
   }
 
+  // One folder (and one play list) per game + video, not per filter: clips cut for one set of
+  // filters are reused when the filters change, instead of being cut again into a new folder.
+  function videoKey() {
+    const path = S.videoPath || "";
+    const stem = path.split("/").pop().replace(/\.[^.]+$/, "");
+    let key = slug(stem) || "video";
+    if (/[^\x00-\x7F]/.test(stem)) {  // non-ASCII names lose letters in slug(); add a short hash to stay unique
+      let h = 0;
+      for (const ch of path) h = (h * 31 + ch.codePointAt(0)) >>> 0;
+      key += "_" + h.toString(36).slice(0, 6);
+    }
+    return key;
+  }
+  const videoName = (path) => (path || "").split("/").pop();
+  const scopeText = () => (S.mode === "full" ? t("full game", "整場比賽") : t(`inning ${S.halfInning} ${S.halfSide}`, `第 ${S.halfInning} 局${S.halfSide === "top" ? "上" : "下"}`));
   function folderName() {
-    const bits = [String(S.gamePk)];
-    S.teams.forEach((side) => { const tm = teamOf(side); bits.push(slug(tm ? tm.name.split(" ").slice(-1)[0] : side)); });
-    [...S.batters, ...S.pitchers].forEach((p) => bits.push(slug(p.split(" ").slice(-1)[0])));
-    if (S.types.size && S.types.size <= 3) S.types.forEach((x) => bits.push(slug(x).replace(/_/g, "")));
-    else if (S.types.size) bits.push(`${S.types.size}types`);
-    return `sport_hightlight/dataset/${bits.join("_")}`;
+    return `sport_hightlight/dataset/${S.gamePk}_${videoKey()}`;
   }
 
   // ------------------------------------------------------------------ request (JobCreateRequest)
   function buildRequest(requestId) {
-    const csv = `sport_hightlight/csv_data/${S.gamePk}_ground_truth.csv`;
+    const csv = `sport_hightlight/csv_data/${S.gamePk}_${videoKey()}_ground_truth.csv`;
     const a1 = { game_pk: Number(S.gamePk), video: S.videoPath };
     if (S.mode === "full") a1.game_offset_seconds = Number(S.offset);
     else {
@@ -294,7 +304,7 @@
       ? esc(t("Press “Generate commands” below. You can run right after; no need to read them.", "按下方的「產生指令」，產生後就能直接執行，不需要看懂指令。"))
       : R.stale
         ? esc(t("Your choices changed. Press “Generate commands” again before running.", "選擇已變更，請再按一次「產生指令」後再執行。"))
-        : `<b>${esc(t(`Ready: ${R.preview.length} steps.`, `已就緒：共 ${R.preview.length} 個步驟。`))}</b> ${esc(t("Just press Run below.", "直接按下方的「執行」即可。"))}`;
+        : `<b>${esc(t(`Ready: ${R.preview.length} steps.`, `已就緒：共 ${R.preview.length} 個步驟。`))}</b> ${esc(t(`${videoName(S.videoPath)} · ${scopeText()} · about ${clipsN(R.request.display.expected_clip_count)}.`, `${videoName(S.videoPath)} · ${scopeText()} · 預計 ${clipsN(R.request.display.expected_clip_count)}。`))} ${esc(t("Generating doesn't cut anything yet: press Run below to make the clips.", "產生指令還不會剪片，請按下方的「執行」開始產生片段。"))}`;
     setSeg("#viewSeg", S.view);
     $("#stale").hidden = !R.stale;
     $("#copyAll").disabled = !R.preview;
@@ -331,7 +341,7 @@
         if (running.id === "cut_clips" && running.progress) text = t(`Cutting clip ${running.progress.done} of ${running.progress.total}`, `正在剪第 ${running.progress.done} / ${running.progress.total} 段`);
         else if (running.id === "blur_flags" && running.progress) text = t(`Blurring flags · ${running.progress.done} of ${running.progress.total}`, `正在模糊旗幟 · ${running.progress.done} / ${running.progress.total}`);
         else text = (STEP_TITLES[running.id] || (() => running.id))() + "…";
-      } else if (job.status === "succeeded") { text = t(`Done. ${clipsN(job.outputs.clips.length)} made.`, `完成，已產生 ${clipsN(job.outputs.clips.length)}。`) + (job.demo ? t(" (demo: no files were written)", "（示範：沒有寫入檔案）") : ""); pct = 100; }
+      } else if (job.status === "succeeded") { const reusedN = job.outputs.reused_clips || 0; text = t(`Done. ${clipsN(job.outputs.clips.length)} ready${reusedN ? ` (${reusedN} reused from earlier runs)` : ""}.`, `完成，共 ${clipsN(job.outputs.clips.length)}${reusedN ? `（${reusedN} 段沿用之前的片段）` : ""}。`) + (job.demo ? t(" (demo: no files were written)", "（示範：沒有寫入檔案）") : ""); pct = 100; }
       else if (job.status === "cancelled") { const k = job.outputs.cancelled_after_clips || 0; text = t(`Stopped. ${clipsN(k)} finished before you stopped.`, `已停止，停止前完成了 ${clipsN(k)}。`); }
       else if (job.status === "failed") text = t("The run stopped with a problem.", "執行時發生問題而停止。");
     }
@@ -359,10 +369,22 @@
     $("#editor").hidden = !has;
     $("#editEmpty").hidden = has;
     $("#exportFromEdit").hidden = !has;
-    $("#editStale").hidden = !(has && R.stale);
+    // Warn when the clips shown aren't what the current settings would make.
+    const otherVideo = has && S.lastRunVideo && S.lastRunVideo !== S.videoPath;
+    const pending = has && (R.stale || R.phase === "ready" || otherVideo);
+    $("#editStale").hidden = !pending;
+    if (pending) {
+      const from = S.lastRunVideo ? videoName(S.lastRunVideo) + (S.lastRunScope ? ` · ${S.lastRunScope}` : "") : t("the previous run", "上一次執行");
+      $("#editStale").textContent = otherVideo
+        ? t(`These clips come from ${from}, but you've switched to ${videoName(S.videoPath)}. Press Run below to make clips from the new video (generate the commands first if needed), or export these clips first.`, `這些片段來自 ${from}，但你已經換成 ${videoName(S.videoPath)}。按下方「執行」產生新影片的片段（必要時先產生指令），也可以先輸出這些片段。`)
+        : R.phase === "ready"
+          ? t(`These clips come from the previous run (${from}). New commands are ready: press Run below to replace them, or export these clips first.`, `這些片段來自上一次執行（${from}）。新的指令已就緒：按下方「執行」就會換成新的片段，也可以先輸出這些片段。`)
+          : t(`These clips come from the previous run (${from}), and you've changed the settings since. Press “Generate commands” and run again to replace them, or export these clips first.`, `這些片段來自上一次執行（${from}），之後你改了設定。按「產生指令」再執行，就會換成新的片段；也可以先輸出這些片段。`);
+    }
     if (!has) return;
     R.sel = Math.min(R.sel, R.clips.length - 1);
     $("#clipCount").textContent = clipsN(R.clips.length);
+    $("#clipSource").textContent = S.lastRunVideo ? t(`from ${videoName(S.lastRunVideo)}`, `來自 ${videoName(S.lastRunVideo)}`) : "";
     $("#clipList").innerHTML = R.clips.map((c, i) => `<li class="clip-item${i === R.sel ? " sel" : ""}" draggable="true" data-i="${i}">
       <span class="grip" aria-hidden="true">⋮⋮</span>
       <span class="thumb"><span class="d">${(c.b - c.a).toFixed(1)}s</span></span>
@@ -455,9 +477,29 @@
   // Ask highlight_editor for each clip's real fps and frame count so trims convert exactly.
   async function enrichClips(job) {
     if (!job || job.demo || !job.outputs.manifest) return;
+    let res;
     try {
-      const res = await api("POST", "/edit/clips", { manifests: [job.outputs.manifest] });
+      res = await api("POST", "/edit/clips", { manifests: [job.outputs.manifest] });
+    } catch (e) {
+      if (e.status === 404) res = { clips: [] };  // manifest moved or deleted: every clip is gone
+      else return;  // keep the estimate; export validation will catch problems
+    }
+    try {
       const byPath = new Map(res.clips.map((c) => [c.clip, c]));
+      // Clips that were moved or deleted since the run can't be played or exported; drop them.
+      const missing = R.clips.filter((c) => !(byPath.get(c.path) || {}).exists);
+      if (missing.length) {
+        R.clips = R.clips.filter((c) => !missing.includes(c));
+        R.sel = 0;
+        if (!R.clips.length) {
+          S.lastJobId = null; R.job = null; R.phase = R.preview ? "ready" : "setup";
+          persist();
+          toast(t("The clips from your last run are no longer on disk, so that run was cleared.", "上次執行的片段檔已不在磁碟上，已清除那次的結果。"));
+          renderAll();
+          return;
+        }
+        toast(t(`${clipsN(missing.length)} from your last run are no longer on disk and were removed from the list.`, `上次執行有 ${clipsN(missing.length)}已不在磁碟上，已從清單移除。`));
+      }
       R.clips.forEach((c) => {
         const info = byPath.get(c.path);
         if (!info || !info.exists) return;
@@ -614,7 +656,8 @@
   }
   function changed() {
     // Any new choice after generating or running means the next step is generating again.
-    if (R.preview && R.phase !== "running") { R.stale = true; if (R.phase === "ready" || R.phase === "done") R.phase = "setup"; }
+    // Also after a reload that restored a finished run (no commands generated in this session yet).
+    if (R.phase !== "running" && (R.preview || R.phase === "done")) { R.stale = true; if (R.phase === "ready" || R.phase === "done") R.phase = "setup"; }
     persist(); renderPlays(); renderCommands(); renderRun(); renderEdit(); renderCta(); renderSteps();
   }
 
@@ -669,6 +712,7 @@
       R.job = await api("POST", "/jobs", R.request);
       S.lastJobId = R.job.id; persist();
       R.phase = "running"; R.clips = []; $("#s-export").hidden = true;
+      S.lastRunVideo = S.videoPath; S.lastRunScope = scopeText(); persist();
       renderAll(); watch(R.job.id);
       document.getElementById("s-run").scrollIntoView({ behavior: "smooth", block: "start" });
     } catch (e) { showFormErrors(e.body); }
@@ -752,6 +796,13 @@
       else generate();
     }
     else if (b.id === "stopBtn") stop();
+    else if (b.id === "resetPage") {
+      // Clears saved choices and the last run (this browser only). Keeps the language. Deletes no files.
+      try { localStorage.removeItem(STORE); } catch (err) { /* storage blocked */ }
+      if (R.es) R.es.close();
+      if (X.es) X.es.close();
+      location.reload();
+    }
     else if (b.closest("#cmdsToggle")) { S.showCmds = !S.showCmds; persist(); renderCommands(); }
     else if (b.id === "copyProject") copyText(JSON.stringify(X.lastProject || buildProject(), null, 2));
     else if (b.id === "exportCancel") cancelRender();

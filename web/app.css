@@ -256,6 +256,7 @@ select.input { appearance: none; background-image: linear-gradient(45deg, transp
 
 .edit-stale { padding: 10px 16px; border-radius: 14px; border: 1px solid rgba(255,122,26,.35); background: rgba(255,122,26,.08); color: var(--orange); font-size: .86rem; }
 #exportFromEdit { margin-left: auto; }
+.clip-source { font-family: var(--mono); font-size: .72rem; font-weight: 400; color: var(--faint); overflow-wrap: anywhere; }
 
 /* ---------- export ---------- */
 .export .disclosure { margin-left: 0; align-self: flex-start; }

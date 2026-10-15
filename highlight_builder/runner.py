@@ -156,8 +156,9 @@ def run_real(job: Job, emit: Emit) -> Dict[str, Any]:
         emit({"event": "step_start", "step_id": sid, "index": index, "total": total_steps})
         if step["tool"] == "make_clip":
             seen_total = {"n": None}
+            this_run: Dict[str, bool] = {}  # clip path -> reused, in completion order
 
-            def on_line(line: str, sid=sid, seen_total=seen_total) -> None:
+            def on_line(line: str, sid=sid, seen_total=seen_total, this_run=this_run) -> None:
                 if not line.startswith("{"):
                     return
                 try:
@@ -168,13 +169,19 @@ def run_real(job: Job, emit: Emit) -> Dict[str, Any]:
                     seen_total["n"] = ev.get("total", 0)
                     emit({"event": "progress", "step_id": sid, "done": 0, "total": seen_total["n"]})
                 elif ev.get("event") in ("clip_done", "clip_skipped"):
+                    if ev.get("event") == "clip_done" and ev.get("clip"):
+                        this_run[ev["clip"]] = bool(ev.get("reused"))
                     emit({"event": "progress", "step_id": sid, "done": ev["index"], "total": ev["total"]})
 
             run_process(build_argv(step, py, ["--progress-json"]), sid, on_line)
             if seen_total["n"] == 0:
                 raise StepFailed(NO_PLAYS_MATCHED, "Your filters matched no plays.", sid)
             manifest = REPO_ROOT / step["args"]["out_dir"] / "manifest.csv"
-            clips = read_manifest(manifest)
+            # The folder's manifest also lists clips from earlier runs; return only this run's selection.
+            clips = [c for c in read_manifest(manifest) if c["path"] in this_run]
+            for c in clips:
+                c["reused"] = this_run[c["path"]]
+            outputs["reused_clips"] = sum(1 for c in clips if c["reused"])
             clips_by_step[sid] = clips
             outputs["clips"] = clips
             outputs["manifest"] = manifest.relative_to(REPO_ROOT).as_posix()

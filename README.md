@@ -173,11 +173,22 @@ python sport_hightlight/make_clip.py \
 
 解碼一律使用 CPU：Intel 硬體解碼（`-hwaccel qsv`）會讓片段固定提早 4 格，NVIDIA／Intel 硬體解碼搭配 libx264 也沒有比較快。`--preset` 只對 libx264 有效。指定的硬體編碼器無法使用時，程式會先試編 1 格並直接報錯。硬體編碼的輸出可能因顯卡或驅動版本略有差異。Apple M 系列的 VideoToolbox 尚未支援，需要先在 Mac 上校正品質設定。
 
-整場資料集（指令見「完整轉播模式」）：72 個 20 秒短片，約 1.2 GB（`--preset fast` 時約 1.4 GB），片段之間沒有重疊；依目前配對規則，`positive` 為 16 個、`hard_negative` 為 56 個。`manifest.csv` 除了標籤與時間，還記錄 `game_pk` 與 `source_video`，合併多場比賽時可追溯來源。已存在的短片預設不重新編碼，需要重切請加 `--overwrite`。
+整場資料集（指令見「完整轉播模式」）：72 個 20 秒短片，約 1.2 GB（`--preset fast` 時約 1.4 GB），片段之間沒有重疊；依目前配對規則，`positive` 為 16 個、`hard_negative` 為 56 個。`manifest.csv` 除了標籤與時間，還記錄 `game_pk` 與 `source_video`，合併多場比賽時可追溯來源。已存在的短片會沿用、不重新編碼（條件見下方「沿用既有片段」），需要重切請加 `--overwrite`。
 
 ### 篩選事件
 
 `make_clip.py` 可以只剪符合條件的事件；不同條件需同時符合，同一條件內的多個值是「任一符合」。片段檔名中的編號仍是 CSV 原本的列號，改變篩選不會讓檔名變動。
+
+### 沿用既有片段
+
+同一支影片換不同篩選條件重跑時，把 `--out-dir` 指向同一個資料夾即可，不會重複擷取：
+
+- 資料夾裡已有同名片段，而且 `manifest.csv` 記錄它來自同一支影片（`source_video`）、同一段時間（`clip_start_seconds`、`clip_end_seconds`）時，直接沿用。
+- 影片不同、或事件前後秒數改變導致時間不同時，只重切那一段；片段檔被刪掉時也會重切。
+- `manifest.csv` 會累積：保留之前執行留下的列，更新本次選到的列，新的列加在後面。
+- `--progress-json` 的 `clip_done` 事件會帶 `"reused": true`，結尾也會印出新增與沿用的數量。
+
+網頁會自動把同一場比賽、同一支影片的片段放在同一個資料夾（`sport_hightlight/dataset/<比賽編號>_<影片名稱>`），事件清單也是每支影片一份（`sport_hightlight/csv_data/<比賽編號>_<影片名稱>_ground_truth.csv`）。
 
 | 參數 | 說明 |
 |---|---|

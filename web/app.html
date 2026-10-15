@@ -8,9 +8,9 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@700;900&family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500&family=Noto+Sans+TC:wght@400;500;700;900&display=swap">
-<link rel="stylesheet" href="/static/theme.css?v=202610111511">
-<link rel="stylesheet" href="/static/app.css?v=202610111511">
-<script src="/static/i18n.js?v=202610111511"></script>
+<link rel="stylesheet" href="/static/theme.css?v=202610120008">
+<link rel="stylesheet" href="/static/app.css?v=202610120008">
+<script src="/static/i18n.js?v=202610120008"></script>
 </head>
 <body>
 
@@ -28,6 +28,7 @@
   </nav>
   <div class="top-actions">
     <span class="mode-pill" id="modePill" hidden></span>
+    <button class="btn link small" type="button" id="resetPage" title="Clear all choices and the last run. No files are deleted." data-zh-title="清除所有選擇與上次的執行結果，不會刪除任何檔案。" data-zh="重設頁面">Reset page</button>
     <div class="lang-switch" role="group" aria-label="Language 語言">
       <button type="button" data-set-lang="zh" aria-pressed="false">中文</button>
       <button type="button" data-set-lang="en" aria-pressed="true">EN</button>
@@ -224,11 +225,11 @@
   <!-- ===== Step 5: edit (demo flow for now) ===== -->
   <section class="block" id="s-edit">
     <div class="block-head"><span class="step-no" data-zh="步驟 5">Step 5</span><h2 data-zh="微調片段">Fine-tune the clips</h2><button class="btn ghost small" type="button" id="exportFromEdit" hidden data-zh="輸出這些片段">Export these clips</button></div>
-    <div class="edit-stale" id="editStale" hidden data-zh="這些片段來自上一次執行，之後你改了篩選條件。按下方「產生指令」再執行，就會換成新的片段；也可以先輸出這些片段。">These clips come from the previous run, and you've changed the filters since. Press “Generate commands” below and run again to replace them, or export these clips first.</div>
+    <div class="edit-stale" id="editStale" hidden></div>
     <p class="empty" id="editEmpty" data-zh="執行完成後，片段會出現在這裡。">Clips appear here when a run finishes.</p>
     <div class="bento edit" id="editor" hidden>
       <div class="card c-list">
-        <div class="card-head"><h3 id="clipCount"></h3><span class="muted" data-zh="依清單順序合併成最終影片">Joined in this order</span></div>
+        <div class="card-head"><h3><span id="clipCount"></span> <span class="clip-source" id="clipSource"></span></h3><span class="muted" data-zh="依清單順序合併成最終影片">Joined in this order</span></div>
         <ol class="clip-list" id="clipList"></ol>
       </div>
       <div class="card c-viewer">
@@ -305,6 +306,6 @@
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-<script src="/static/app.js?v=202610111511"></script>
+<script src="/static/app.js?v=202610120008"></script>
 </body>
 </html>

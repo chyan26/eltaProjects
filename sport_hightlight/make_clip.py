@@ -206,6 +206,39 @@ def filter_rows(rows: List[Dict[str, str]], args: argparse.Namespace) -> List[Tu
     return kept
 
 
+MANIFEST_FIELDS: Tuple[str, ...] = (
+    "clip_path", "label", "game_pk", "source_video", "inning", "half", "event_type",
+    "description", "event_seconds", "event_time_source", "clip_start_seconds",
+    "clip_end_seconds", "clip_duration_seconds", "is_official_highlight",
+    "official_highlight_title", "official_highlight_url", "batter", "pitcher",
+    "start_snapped_to_pause", "end_snapped_to_pause",
+)
+
+
+def read_manifest(path: Path) -> Dict[str, Dict[str, str]]:
+    """Existing manifest rows keyed by clip_path (insertion order kept); empty if there is none."""
+    if not path.is_file():
+        return {}
+    with path.open("r", encoding="utf-8-sig", newline="") as handle:
+        return {row["clip_path"]: row for row in csv.DictReader(handle) if row.get("clip_path")}
+
+
+def can_reuse(clip_path: Path, previous: Optional[Dict[str, str]], video: Path,
+              clip_start: float, clip_end: float) -> bool:
+    """An existing clip is reused only if the manifest says it came from the same video and time range."""
+    if previous is None or not clip_path.is_file():
+        return False
+    if previous.get("source_video", "") != str(video):
+        return False
+    try:
+        old_start = float(previous.get("clip_start_seconds", ""))
+        old_end = float(previous.get("clip_end_seconds", ""))
+    except ValueError:
+        return False
+    # Both sides are written with 3 decimals; allow for that rounding.
+    return abs(old_start - clip_start) < 0.0015 and abs(old_end - clip_end) < 0.0015
+
+
 def emit_progress(enabled: bool, **event) -> None:
     if enabled:
         print(json.dumps(event, ensure_ascii=False), file=sys.stderr, flush=True)
@@ -373,11 +406,17 @@ def make_clips(args: argparse.Namespace) -> int:
     finished = 0  # clips done or skipped, in completion order
     emit_progress(progress, event="clips_start", total=total)
 
-    def report(event: str, clip: Optional[Path] = None) -> None:
+    def report(event: str, clip: Optional[Path] = None, reused: bool = False) -> None:
         nonlocal finished
         finished += 1
-        extra = {"clip": clip.as_posix()} if clip is not None else {}
+        extra: Dict[str, object] = {"clip": clip.as_posix()} if clip is not None else {}
+        if reused:
+            extra["reused"] = True
         emit_progress(progress, event=event, index=finished, total=total, **extra)
+
+    # Clips already in this folder from earlier runs (possibly with other filters).
+    previous_rows = read_manifest(manifest_path)
+    reused = 0
 
     snap_speech = not getattr(args, "no_snap_speech", False)
     snap_window = getattr(args, "snap_window", 4.0)
@@ -433,10 +472,11 @@ def make_clips(args: argparse.Namespace) -> int:
         clip_name = f"event_{row_number:04d}_{inning}{half}_{event_type}.mp4"
         clip_path = output_dir / label / clip_name
 
-        if not clip_path.exists() or args.overwrite:
-            pending.append((clip_path, clip_start, clip_duration))
+        if not args.overwrite and can_reuse(clip_path, previous_rows.get(str(clip_path)), args.video, clip_start, clip_end):
+            reused += 1
+            report("clip_done", clip_path, reused=True)  # same video and time range: no need to cut again
         else:
-            report("clip_done", clip_path)  # already cut earlier; kept as is
+            pending.append((clip_path, clip_start, clip_duration))
 
         # manifest 會進版控，一律用 / 分隔，Windows 產生的檔案在 macOS／Linux 也能用
         manifest_rows.append({
@@ -472,21 +512,27 @@ def make_clips(args: argparse.Namespace) -> int:
     extract_clips(args.video, pending, video_args, args.jobs, on_done=lambda path: report("clip_done", path))
     created = len(pending)
 
-    manifest_fields = list(manifest_rows[0].keys()) if manifest_rows else [
-        "clip_path", "label", "game_pk", "source_video", "inning", "half", "event_type",
-        "description", "event_seconds", "event_time_source", "clip_start_seconds",
-        "clip_end_seconds", "clip_duration_seconds", "is_official_highlight",
-        "official_highlight_title", "official_highlight_url", "batter", "pitcher",
-        "start_snapped_to_pause", "end_snapped_to_pause",
-    ]
+    # Preserve earlier runs, replacing only rows touched in this run.
+    merged = dict(previous_rows)
+    for row in manifest_rows:
+        merged[row["clip_path"]] = row
+
+    manifest_fields = list(MANIFEST_FIELDS)
+    for row in merged.values():
+        for key in row:
+            if key not in manifest_fields:
+                manifest_fields.append(key)
+
     with manifest_path.open("w", encoding="utf-8", newline="") as manifest_file:
-        writer = csv.DictWriter(manifest_file, fieldnames=manifest_fields)
+        writer = csv.DictWriter(manifest_file, fieldnames=manifest_fields, restval="")
         writer.writeheader()
-        writer.writerows(manifest_rows)
+        writer.writerows(merged.values())
 
     if len(selected) != len(rows):
         print(f"篩選：{len(rows)} 筆事件中保留 {len(selected)} 筆。")
-    print(f"完成：建立/保留 {len(manifest_rows)} 個事件短片，新增 {created} 個。")
+    print(f"完成：本次 {len(manifest_rows)} 個事件短片，新增 {created} 個，沿用 {reused} 個（同一影片、同一時間範圍）。")
+    if len(merged) != len(manifest_rows):
+        print(f"manifest 共 {len(merged)} 筆（包含之前執行留下的片段）。")
     print(f"略過 {skipped} 筆沒有有效影片時間的事件。")
     print(f"manifest：{manifest_path}")
     return 0
